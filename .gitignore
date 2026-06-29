@@ -1,0 +1,83 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python environments
+.venv/
+venv/
+env/
+
+# Test and analysis cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets and environment configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and generated output
+logs/
+outputs/
+data/outputs/
+tmp/
+temp/
+*.log
+
+# Model checkpoints and inference engines
+checkpoints/
+weights/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.engine
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Local AI models
+data/input/models/
+
+# Large media input files
+data/input/video/
+data/input/audio_raw/
+
+# Common media files
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.mp3
+*.flac
+
+# Local debugging artifacts
+debug_vision_output.json
+
+# Preserve required directory structure
+!data/input/models/.gitkeep
+!data/input/video/.gitkeep
+!data/input/audio_raw/.gitkeep
+!data/outputs/.gitkeep
+
+# Local backup files
+*旧的.py
+*旧的.md

@@ -1,0 +1,18 @@
+* text=auto
+
+# Linux scripts must use LF
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Source and configuration files
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
