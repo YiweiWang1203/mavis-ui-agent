@@ -27,6 +27,12 @@ OPTIONAL_MODULES = [
     "openai",
 ]
 
+DEPRECATED_MODELS = {
+    "Pro/Qwen/Qwen2.5-VL-7B-Instruct": "Qwen/Qwen3-VL-8B-Instruct",
+    "Qwen/Qwen2.5-VL-7B-Instruct": "Qwen/Qwen3-VL-8B-Instruct",
+    "Qwen/Qwen2-VL-72B-Instruct": "Qwen/Qwen3-VL-32B-Instruct",
+}
+
 
 def check_module(name: str) -> dict[str, Any]:
     try:
@@ -96,6 +102,21 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     workspace_root = detect_workspace_root()
     model_root = Path(os.getenv("FUNASR_MODELS_DIR", workspace_root / "data" / "models" / "iic")).expanduser()
 
+    environment = {
+        "MAVIS_WORKSPACE_ROOT": os.getenv("MAVIS_WORKSPACE_ROOT"),
+        "FUNASR_MODELS_DIR": os.getenv("FUNASR_MODELS_DIR"),
+        "ASR_DEVICE": os.getenv("ASR_DEVICE", "cuda"),
+        "VISION_MODEL": os.getenv("VISION_MODEL"),
+        "VISION_BASE_URL": os.getenv("VISION_BASE_URL"),
+        "VL_MODEL": os.getenv("VL_MODEL"),
+        "VL_BASE_URL": os.getenv("VL_BASE_URL"),
+    }
+    deprecated_model_hits = {
+        key: {"current": value, "replacement": DEPRECATED_MODELS[value]}
+        for key, value in environment.items()
+        if key.endswith("_MODEL") and value in DEPRECATED_MODELS
+    }
+
     return {
         "python": {
             "executable": sys.executable,
@@ -107,15 +128,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "exists": workspace_root.exists(),
             "outputs_writable": check_writable_dir(workspace_root / "outputs"),
         },
-        "environment": {
-            "MAVIS_WORKSPACE_ROOT": os.getenv("MAVIS_WORKSPACE_ROOT"),
-            "FUNASR_MODELS_DIR": os.getenv("FUNASR_MODELS_DIR"),
-            "ASR_DEVICE": os.getenv("ASR_DEVICE", "cuda"),
-            "VISION_MODEL": os.getenv("VISION_MODEL"),
-            "VISION_BASE_URL": os.getenv("VISION_BASE_URL"),
-            "VL_MODEL": os.getenv("VL_MODEL"),
-            "VL_BASE_URL": os.getenv("VL_BASE_URL"),
-        },
+        "environment": environment,
+        "deprecated_models": deprecated_model_hits,
         "modules": {
             "required": [check_module(name) for name in REQUIRED_MODULES],
             "optional": [check_module(name) for name in OPTIONAL_MODULES],
@@ -141,6 +155,8 @@ def has_failures(report: dict[str, Any]) -> bool:
         if item["path"] and not item["ok"]:
             return True
     if not report["workspace"]["outputs_writable"]["ok"]:
+        return True
+    if report.get("deprecated_models"):
         return True
     return False
 
@@ -180,6 +196,11 @@ def main() -> int:
         for key, item in report["paths"].items():
             if item["path"]:
                 print(f"{key}: {'OK' if item['ok'] else 'MISSING'} {item['path']}")
+
+        if report.get("deprecated_models"):
+            print("\nDeprecated model configuration:")
+            for key, item in report["deprecated_models"].items():
+                print(f"  {key}: {item['current']} -> use {item['replacement']}")
 
     return 1 if failed else 0
 

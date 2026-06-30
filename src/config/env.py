@@ -15,7 +15,7 @@ BASIC_BASE_URL = os.getenv("BASIC_BASE_URL")
 BASIC_API_KEY = os.getenv("BASIC_API_KEY")
 
 # Vision-language LLM configuration (for tasks requiring visual understanding)
-VL_MODEL = os.getenv("VL_MODEL", "gpt-4o")
+VL_MODEL = os.getenv("VL_MODEL", "Qwen/Qwen3-VL-8B-Instruct")
 VL_BASE_URL = os.getenv("VL_BASE_URL")
 VL_API_KEY = os.getenv("VL_API_KEY")
 
