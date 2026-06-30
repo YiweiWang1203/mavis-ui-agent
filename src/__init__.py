@@ -1,23 +1,7 @@
-# 从子包 tools 中导入所有已经汇总好的工具
-from .tools import (
-    asr_tool,
-    read_file_tool,
-    bash_tool,
-    write_file_tool,
-    python_repl_tool,
-    tavily_tool,
-    sa2va_tool
-)
+"""Project package root.
 
-# 以后如果 workflow.py 里有核心类，也可以在这里暴露
-# from .workflow import MyWorkflow
+Keep this module lightweight: importing ``src.config`` or ``src.preprocess``
+should not eagerly import LangChain tools or model clients.
+"""
 
-__all__ = [
-    "asr_tool",
-    "read_file_tool",
-    "bash_tool",
-    "write_file_tool",
-    "python_repl_tool",
-    "tavily_tool",
-    "sa2va_tool"
-]
+__all__: list[str] = []

@@ -4,6 +4,7 @@ from src.config import TEAM_MEMBERS
 from src.graph import build_graph
 from langchain_community.adapters.openai import convert_message_to_dict
 import uuid
+from src.service.input_adapter import prepare_workflow_input
 
 # Configure logging
 logging.basicConfig(
@@ -32,6 +33,15 @@ async def run_agent_workflow(
     debug: bool = False,
     deep_thinking_mode: bool = False,
     search_before_planning: bool = False,
+    *,
+    text: str | None = None,
+    image_path: str | None = None,
+    video_path: str | None = None,
+    audio_path: str | None = None,
+    preprocess_output_dir: str | None = None,
+    rotate_degrees: int = 180,
+    orientation_correction_enabled: bool = True,
+    enable_asr: bool = False,
 ):
     """Run the agent workflow with the given user input.
 
@@ -42,11 +52,32 @@ async def run_agent_workflow(
     Returns:
         The final state after the workflow completes
     """
-    if not user_input_messages:
+    if not user_input_messages and not (image_path or video_path):
         raise ValueError("Input could not be empty")
 
     if debug:
         enable_debug_logging()
+
+    if image_path or video_path:
+        prepared = prepare_workflow_input(
+            text=text,
+            image_path=image_path,
+            video_path=video_path,
+            audio_path=audio_path,
+            preprocess_output_dir=preprocess_output_dir,
+            rotate_degrees=rotate_degrees,
+            orientation_correction_enabled=orientation_correction_enabled,
+            enable_asr=enable_asr,
+        )
+        graph_input = prepared["state"]
+        user_input_messages = graph_input["messages"]
+    else:
+        graph_input = {
+            "TEAM_MEMBERS": TEAM_MEMBERS,
+            "messages": user_input_messages,
+            "deep_thinking_mode": deep_thinking_mode,
+            "search_before_planning": search_before_planning,
+        }
 
     logger.info(f"Starting workflow with user input: {user_input_messages}")
 
@@ -61,17 +92,7 @@ async def run_agent_workflow(
     is_handoff_case = False
 
     # TODO: extract message content from object, specifically for on_chat_model_stream
-    async for event in graph.astream_events(
-        {
-            # Constants
-            "TEAM_MEMBERS": TEAM_MEMBERS,
-            # Runtime Variables
-            "messages": user_input_messages,
-            "deep_thinking_mode": deep_thinking_mode,
-            "search_before_planning": search_before_planning,
-        },
-        version="v2",
-    ):
+    async for event in graph.astream_events(graph_input, version="v2"):
         kind = event.get("event")
         data = event.get("data")
         name = event.get("name")

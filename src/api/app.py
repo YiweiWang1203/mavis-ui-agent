@@ -59,7 +59,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage] = Field(..., description="The conversation history")
+    messages: List[ChatMessage] = Field(default_factory=list, description="The conversation history")
     debug: Optional[bool] = Field(False, description="Whether to enable debug logging")
     deep_thinking_mode: Optional[bool] = Field(
         False, description="Whether to enable deep thinking mode"
@@ -67,6 +67,14 @@ class ChatRequest(BaseModel):
     search_before_planning: Optional[bool] = Field(
         False, description="Whether to search before planning"
     )
+    text: Optional[str] = Field(None, description="Plain user request for media-path workflows")
+    image_path: Optional[str] = Field(None, description="Local sketch image path")
+    video_path: Optional[str] = Field(None, description="Local uploaded sketch video path")
+    audio_path: Optional[str] = Field(None, description="Optional local audio path")
+    preprocess_output_dir: Optional[str] = Field(None, description="Preprocess output directory")
+    rotate_degrees: Optional[int] = Field(180, description="Sketch orientation correction rotation")
+    orientation_correction_enabled: Optional[bool] = Field(True, description="Enable orientation correction")
+    enable_asr: Optional[bool] = Field(False, description="Enable ASR during video preprocessing")
 
 
 @app.post("/api/chat/stream")
@@ -112,6 +120,14 @@ async def chat_endpoint(request: ChatRequest, req: Request):
                     request.debug,
                     request.deep_thinking_mode,
                     request.search_before_planning,
+                    text=request.text,
+                    image_path=request.image_path,
+                    video_path=request.video_path,
+                    audio_path=request.audio_path,
+                    preprocess_output_dir=request.preprocess_output_dir,
+                    rotate_degrees=request.rotate_degrees or 180,
+                    orientation_correction_enabled=bool(request.orientation_correction_enabled),
+                    enable_asr=bool(request.enable_asr),
                 ):
                     # Check if client is still connected
                     if await req.is_disconnected():
