@@ -51,7 +51,7 @@ def _infer_viewport(vision_elements: dict | None, ui_state: dict | None = None) 
 
 
 def _pixel_bbox_from_normalized(bbox: dict[str, Any], viewport: dict[str, int]) -> list[int]:
-    """Return UI-State bbox in [ymin, xmin, ymax, xmax] pixel order."""
+    """Return UI-State bbox in [x_min, y_min, x_max, y_max] pixel order."""
     width = viewport["width"]
     height = viewport["height"]
     x_min = max(0.0, min(1.0, float(bbox["x_min"])))
@@ -68,15 +68,15 @@ def _pixel_bbox_from_normalized(bbox: dict[str, Any], viewport: dict[str, int]) 
     ymax_px = min(height, max(ymin_px + 1, ymax_px))
     xmin_px = min(max(0, xmin_px), width - 1)
     ymin_px = min(max(0, ymin_px), height - 1)
-    return [ymin_px, xmin_px, ymax_px, xmax_px]
+    return [xmin_px, ymin_px, xmax_px, ymax_px]
 
 
 def _clamp_pixel_bbox(raw_bbox: Any, viewport: dict[str, int]) -> list[int] | None:
-    """Clamp a model-provided [ymin, xmin, ymax, xmax] bbox to the viewport."""
+    """Clamp a model-provided [x_min, y_min, x_max, y_max] bbox to the viewport."""
     if not isinstance(raw_bbox, list) or len(raw_bbox) != 4:
         return None
     try:
-        ymin, xmin, ymax, xmax = [int(round(float(v))) for v in raw_bbox]
+        xmin, ymin, xmax, ymax = [int(round(float(v))) for v in raw_bbox]
     except Exception:
         return None
 
@@ -86,7 +86,7 @@ def _clamp_pixel_bbox(raw_bbox: Any, viewport: dict[str, int]) -> list[int] | No
     ymin = min(max(0, ymin), height - 1)
     xmax = min(width, max(xmin + 1, xmax))
     ymax = min(height, max(ymin + 1, ymax))
-    return [ymin, xmin, ymax, xmax]
+    return [xmin, ymin, xmax, ymax]
 
 
 def _fallback_element_from_vision(element: dict[str, Any], viewport: dict[str, int]) -> dict[str, Any]:
@@ -106,7 +106,7 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict) -> dict:
     """Use validated vision bboxes as the authoritative UI-State geometry.
 
     The LLM may enrich semantic fields, but geometry must stay within the target
-    viewport. UI-State uses pixel bboxes in [ymin, xmin, ymax, xmax] order.
+    viewport. UI-State uses pixel bboxes in [x_min, y_min, x_max, y_max] order.
     """
     if not isinstance(ui_state, dict):
         ui_state = {}

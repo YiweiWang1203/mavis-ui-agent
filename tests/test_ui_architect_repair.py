@@ -32,7 +32,7 @@ def test_repair_ui_state_uses_vision_bbox_and_clamps_to_viewport():
     element = repaired["elements"][0]
     assert element["text"] == "Buy now"
     assert element["rpa_action"] == "purchase_now"
-    assert element["spatial_info"]["bbox"] == [81, 75, 162, 300]
+    assert element["spatial_info"]["bbox"] == [75, 81, 300, 162]
     assert element["spatial_info"]["source"] == "vision_bbox"
 
 
@@ -58,5 +58,5 @@ def test_repair_ui_state_adds_missing_vision_elements():
     repaired = repair_ui_state_with_vision({"elements": []}, vision)
 
     assert [e["id"] for e in repaired["elements"]] == ["e1", "e2"]
-    assert repaired["elements"][1]["spatial_info"]["bbox"] == [650, 188, 731, 338]
+    assert repaired["elements"][1]["spatial_info"]["bbox"] == [188, 650, 338, 731]
     assert repaired["elements"][1]["text"] == "Cart"
