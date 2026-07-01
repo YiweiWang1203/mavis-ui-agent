@@ -698,7 +698,8 @@ def code_node(state: State) -> Command[Literal["supervisor"]]:
                     name="coder",
                 )
             ],
-            "final_code": final_code # 🌟 把核心资产装入主状态
+            "final_code": final_code, # 🌟 把核心资产装入主状态
+            "final_code_path": file_path,
         },
         goto="supervisor",
     )
