@@ -1,0 +1,34 @@
+{
+  "version": "0.1",
+  "description": "Rule-based UI priors for recovering commonly missed controls after visual extraction.",
+  "global_mobile": {
+    "navigation_note": "Most secondary mobile screens need an exit affordance such as back, close, or home. Root tabs and landing screens may intentionally omit it."
+  },
+  "page_kinds": {
+    "mobile_product_detail": {
+      "intent_markers": [
+        "商品详情",
+        "商品页",
+        "淘宝",
+        "product detail",
+        "product page",
+        "buy now",
+        "cart"
+      ],
+      "required_slots": [
+        {
+          "slot": "top_navigation_back",
+          "severity": "recommended",
+          "element": {
+            "id": "nav_back_prior",
+            "type": "icon_button",
+            "semantic_role": "back",
+            "rpa_action": "go_back",
+            "text": "",
+            "bbox_ratio": [0.032, 0.03, 0.117, 0.071]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "version": "0.1",
+  "description": "Geometry priors for low-fidelity hand-drawn UI sketches.",
+  "screen_normalization": {
+    "mobile": {
+      "target_ratios": ["9:16", "19.5:9"],
+      "default_target_size": [390, 844],
+      "policy": "Preserve user layout while correcting perspective and orientation before letterboxing."
+    },
+    "desktop": {
+      "target_ratios": ["16:9", "16:10"],
+      "default_target_size": [1440, 900],
+      "policy": "Preserve global layout and avoid stretching individual UI regions."
+    }
+  },
+  "canonical_shapes": {
+    "rectangles": {
+      "description": "Recover near-rectangular UI containers, images, cards, fields, and buttons into straight-edged boxes when confidence is high.",
+      "min_confidence": 0.75
+    },
+    "circles": {
+      "description": "Recover near-circular icons, avatars, radio buttons, and floating controls into circles or square icon boxes when confidence is high.",
+      "min_confidence": 0.75
+    },
+    "lines": {
+      "description": "Snap nearly horizontal or vertical strokes that represent dividers, nav bars, or input borders.",
+      "angle_tolerance_degrees": 8
+    }
+  },
+  "future_pipeline": [
+    "detect screen boundary and apply homography",
+    "infer target platform ratio",
+    "snap high-confidence primitives",
+    "remap element boxes to normalized viewport"
+  ]
+}

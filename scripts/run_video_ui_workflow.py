@@ -67,6 +67,9 @@ def run_deterministic_pipeline(prepared: dict[str, Any]) -> dict[str, Any]:
     if isinstance(ui_state, dict):
         print("ui_state_json keys:", list(ui_state.keys()))
         print("locale:", ui_state.get("page_meta", {}).get("locale"))
+        print("page_kind:", ui_state.get("page_meta", {}).get("page_kind"))
+        if ui_state.get("warnings"):
+            print("ui_warnings:", ui_state.get("warnings"))
     if not ui_state or (isinstance(ui_state, dict) and ui_state.get("error")):
         return state
 
@@ -100,6 +103,7 @@ def run_full_graph(prepared: dict[str, Any]) -> dict[str, Any]:
 
 
 def _summary(prepared: dict[str, Any], final_state: dict[str, Any], mode: str) -> dict[str, Any]:
+    ui_state = final_state.get("ui_state_json") if isinstance(final_state.get("ui_state_json"), dict) else {}
     return {
         "mode": mode,
         "selected_image_path": prepared.get("selected_image_path"),
@@ -109,6 +113,8 @@ def _summary(prepared: dict[str, Any], final_state: dict[str, Any], mode: str) -
         "preferred_locale": prepared.get("preferred_locale"),
         "vision_status": final_state.get("vision_status"),
         "ui_state_json_present": final_state.get("ui_state_json") is not None,
+        "ui_page_kind": ui_state.get("page_meta", {}).get("page_kind"),
+        "ui_warnings": ui_state.get("warnings", []),
         "final_code_present": final_state.get("final_code") is not None,
         "final_code_length": len(final_state.get("final_code") or ""),
         "final_code_path": final_state.get("final_code_path"),

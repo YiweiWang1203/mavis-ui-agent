@@ -3,6 +3,8 @@ import json
 import os
 from typing import Any
 
+from src.priors import apply_ui_priors
+
 try:
     from dotenv import load_dotenv
 
@@ -214,7 +216,12 @@ Return the final fused UI-State JSON.
 
         raw_json_str = response.choices[0].message.content
         ui_state = json.loads(raw_json_str)
-        return repair_ui_state_with_vision(ui_state, vision_elements, preferred_locale or infer_locale_from_text(user_intent))
+        repaired = repair_ui_state_with_vision(
+            ui_state,
+            vision_elements,
+            preferred_locale or infer_locale_from_text(user_intent),
+        )
+        return apply_ui_priors(repaired, user_intent=user_intent, vision_elements=vision_elements)
 
     except json.JSONDecodeError as exc:
         print(f"UI Architect JSON parse failed: {exc}")
