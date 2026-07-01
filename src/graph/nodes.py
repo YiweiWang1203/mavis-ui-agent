@@ -425,7 +425,7 @@ def ui_architect_node(state: State) -> Command[Literal["supervisor"]]:
 
     # 正常的数据合成业务逻辑
     combined_intent = f"【总体审美要求】\n{original_prompt}\n\n【语音/文本细节需求】\n{intent}"
-    result_json = generate_ui_state(combined_intent, vision_elements)
+    result_json = generate_ui_state(combined_intent, vision_elements, preferred_locale=state.get("preferred_locale"))
 
     try:
         al = state.get('_audit_logger_instance')

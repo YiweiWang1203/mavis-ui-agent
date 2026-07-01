@@ -27,6 +27,48 @@ def _get_team_members() -> list[str]:
         return DEFAULT_TEAM_MEMBERS
 
 
+def infer_preferred_locale(user_text: str | None) -> str:
+    """Infer UI locale from explicit language requests, then prompt language."""
+    text = (user_text or "").strip()
+    lowered = text.lower()
+
+    english_markers = [
+        "english",
+        "en-us",
+        "en_us",
+        "en ",
+        "global users",
+        "foreign users",
+        "overseas",
+        "international",
+        "英文",
+        "英语",
+        "海外用户",
+        "外国用户",
+        "国际化",
+    ]
+    chinese_markers = [
+        "chinese",
+        "zh-cn",
+        "zh_cn",
+        "中文",
+        "汉语",
+        "中国用户",
+        "中文界面",
+    ]
+
+    if any(marker in lowered for marker in english_markers) and not any(marker in lowered for marker in chinese_markers):
+        return "en"
+    if any(marker in lowered for marker in chinese_markers):
+        return "zh-CN"
+
+    ascii_letters = sum(1 for ch in text if ("a" <= ch.lower() <= "z"))
+    cjk_chars = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    if ascii_letters >= 12 and ascii_letters > cjk_chars * 2:
+        return "en"
+    return "zh-CN"
+
+
 def score_sketch_candidate(image_path: str) -> dict[str, Any]:
     """Score an image for suitability as the UI sketch input."""
     import cv2
@@ -224,6 +266,7 @@ def build_multimodal_prompt(
     audio_path: str | None = None,
     video_context: dict[str, Any] | None = None,
     package_path: str | None = None,
+    preferred_locale: str = "zh-CN",
 ) -> str:
     """Create the canonical first user message consumed by graph nodes."""
     lines = [
@@ -231,6 +274,7 @@ def build_multimodal_prompt(
         "",
         "[PREPROCESS CONTEXT]",
         f"selected_source: {selected_source}",
+        f"preferred_locale: {preferred_locale}",
     ]
 
     if video_context:
@@ -264,6 +308,7 @@ def prepare_workflow_input(
 ) -> dict[str, Any]:
     """Prepare graph input state from image/video/audio paths."""
     user_text = text or DEFAULT_USER_TEXT
+    preferred_locale = infer_preferred_locale(user_text)
     if not image_path and not video_path:
         raise ValueError("Either image_path or video_path must be provided")
 
@@ -307,6 +352,7 @@ def prepare_workflow_input(
         audio_path=audio_path,
         video_context=video_result,
         package_path=package_path,
+        preferred_locale=preferred_locale,
     )
 
     state = {
@@ -321,6 +367,7 @@ def prepare_workflow_input(
         "ui_state_json": None,
         "final_code": None,
         "warnings": (video_result or {}).get("warnings", []),
+        "preferred_locale": preferred_locale,
     }
 
     return {
@@ -332,4 +379,5 @@ def prepare_workflow_input(
         "video_result": video_result,
         "selection": selection,
         "package_path": package_path,
+        "preferred_locale": preferred_locale,
     }

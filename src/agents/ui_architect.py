@@ -50,6 +50,17 @@ def _infer_viewport(vision_elements: dict | None, ui_state: dict | None = None) 
     return dict(DEFAULT_MOBILE_VIEWPORT)
 
 
+def infer_locale_from_text(text: str | None) -> str:
+    lowered = (text or "").lower()
+    if any(marker in lowered for marker in ("english", "英文", "英语", "overseas", "foreign users", "global users")):
+        return "en"
+    if any(marker in lowered for marker in ("中文", "chinese", "zh-cn", "zh_cn")):
+        return "zh-CN"
+    ascii_letters = sum(1 for ch in (text or "") if ("a" <= ch.lower() <= "z"))
+    cjk_chars = sum(1 for ch in (text or "") if "\u4e00" <= ch <= "\u9fff")
+    return "en" if ascii_letters >= 12 and ascii_letters > cjk_chars * 2 else "zh-CN"
+
+
 def _pixel_bbox_from_normalized(bbox: dict[str, Any], viewport: dict[str, int]) -> list[int]:
     """Return UI-State bbox in [x_min, y_min, x_max, y_max] pixel order."""
     width = viewport["width"]
@@ -102,7 +113,7 @@ def _fallback_element_from_vision(element: dict[str, Any], viewport: dict[str, i
     }
 
 
-def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict) -> dict:
+def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred_locale: str | None = None) -> dict:
     """Use validated vision bboxes as the authoritative UI-State geometry.
 
     The LLM may enrich semantic fields, but geometry must stay within the target
@@ -119,6 +130,7 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict) -> dict:
     page_meta.setdefault("inferred_device", "mobile" if viewport["width"] <= 600 else "pc")
     page_meta.setdefault("confidence", "medium")
     page_meta["viewport"] = viewport
+    page_meta["locale"] = preferred_locale or page_meta.get("locale") or "zh-CN"
 
     vision_by_id = {
         element.get("id"): element
@@ -170,12 +182,15 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict) -> dict:
     return repaired
 
 
-def generate_ui_state(user_intent: str, vision_elements: dict) -> dict:
+def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None) -> dict:
     """Fuse user intent and validated vision data into a UI-State JSON contract."""
     system_prompt = read_ui_architect_prompt()
     user_content = f"""
 [User Intent]
 {user_intent}
+
+[Preferred Locale]
+{preferred_locale or infer_locale_from_text(user_intent)}
 
 [Vision Elements]
 {json.dumps(vision_elements, ensure_ascii=False, indent=2)}
@@ -199,7 +214,7 @@ Return the final fused UI-State JSON.
 
         raw_json_str = response.choices[0].message.content
         ui_state = json.loads(raw_json_str)
-        return repair_ui_state_with_vision(ui_state, vision_elements)
+        return repair_ui_state_with_vision(ui_state, vision_elements, preferred_locale or infer_locale_from_text(user_intent))
 
     except json.JSONDecodeError as exc:
         print(f"UI Architect JSON parse failed: {exc}")

@@ -26,9 +26,10 @@ def test_repair_ui_state_uses_vision_bbox_and_clamps_to_viewport():
         ],
     }
 
-    repaired = repair_ui_state_with_vision(model_state, vision)
+    repaired = repair_ui_state_with_vision(model_state, vision, preferred_locale="en")
 
     assert repaired["page_meta"]["viewport"] == {"width": 375, "height": 812}
+    assert repaired["page_meta"]["locale"] == "en"
     element = repaired["elements"][0]
     assert element["text"] == "Buy now"
     assert element["rpa_action"] == "purchase_now"
@@ -57,6 +58,7 @@ def test_repair_ui_state_adds_missing_vision_elements():
 
     repaired = repair_ui_state_with_vision({"elements": []}, vision)
 
+    assert repaired["page_meta"]["locale"] == "zh-CN"
     assert [e["id"] for e in repaired["elements"]] == ["e1", "e2"]
     assert repaired["elements"][1]["spatial_info"]["bbox"] == [188, 650, 338, 731]
     assert repaired["elements"][1]["text"] == "Cart"

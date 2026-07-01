@@ -40,6 +40,20 @@ def test_prepare_workflow_input_from_video(monkeypatch, tmp_path):
     assert f"[AUDIO FILE]: {audio}" in prepared["final_prompt"]
     assert prepared["state"]["messages"][0]["content"] == prepared["final_prompt"]
     assert prepared["state"]["vision_retry_count"] == 0
+    assert prepared["preferred_locale"] == "en"
+    assert "preferred_locale: en" in prepared["final_prompt"]
+
+
+def test_infer_preferred_locale_defaults_to_chinese():
+    assert input_adapter.infer_preferred_locale("请根据淘宝商品页生成前端 UI") == "zh-CN"
+
+
+def test_infer_preferred_locale_from_english_prompt():
+    assert input_adapter.infer_preferred_locale("Create a mobile product page for overseas users") == "en"
+
+
+def test_infer_preferred_locale_explicit_chinese_wins():
+    assert input_adapter.infer_preferred_locale("Create a Chinese UI for this product page") == "zh-CN"
 
 
 def test_prepare_workflow_input_selects_better_video_sketch(monkeypatch, tmp_path):
