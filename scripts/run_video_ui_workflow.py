@@ -107,6 +107,9 @@ def _summary(prepared: dict[str, Any], final_state: dict[str, Any], mode: str) -
     return {
         "mode": mode,
         "selected_image_path": prepared.get("selected_image_path"),
+        "recognition_image_path": prepared.get("recognition_image_path"),
+        "layout_image_path": prepared.get("layout_image_path"),
+        "vision_image_mode": prepared.get("vision_image_mode"),
         "selected_source": prepared.get("selected_source"),
         "audio_path": prepared.get("audio_path"),
         "package_path": prepared.get("package_path"),
@@ -131,6 +134,12 @@ def main() -> int:
     parser.add_argument("--rotate-degrees", type=int, choices=[0, 90, 180, 270], default=180)
     parser.add_argument("--disable-orientation-correction", action="store_true")
     parser.add_argument("--enable-asr", action="store_true", help="Enable ASR during preprocessing")
+    parser.add_argument(
+        "--vision-image-mode",
+        choices=["recognition", "normalized"],
+        default="recognition",
+        help="Use orientation-corrected recognition image for VLM by default; use normalized to reproduce the previous behavior.",
+    )
     parser.add_argument("--full-graph", action="store_true", help="Run the planner/supervisor LangGraph instead of the deterministic pipeline")
     args = parser.parse_args()
 
@@ -142,10 +151,14 @@ def main() -> int:
         rotate_degrees=args.rotate_degrees,
         orientation_correction_enabled=not args.disable_orientation_correction,
         enable_asr=args.enable_asr,
+        vision_image_mode=args.vision_image_mode,
     )
     _apply_locale_override(prepared, args.locale)
 
     print("selected_image_path:", prepared["selected_image_path"])
+    print("recognition_image_path:", prepared.get("recognition_image_path"))
+    print("layout_image_path:", prepared.get("layout_image_path"))
+    print("vision_image_mode:", prepared.get("vision_image_mode"))
     print("audio_path:", prepared["audio_path"])
     print("preferred_locale:", prepared["preferred_locale"])
 

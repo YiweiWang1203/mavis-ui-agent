@@ -208,8 +208,11 @@ def prepare_input_from_video(
     rotate_degrees: int = 180,
     orientation_correction_enabled: bool = True,
     enable_asr: bool = False,
+    vision_image_mode: str = "recognition",
 ) -> dict[str, Any]:
     """Run the pre-agent video pipeline and expose graph-ready input pieces."""
+    if vision_image_mode not in {"recognition", "normalized"}:
+        raise ValueError("vision_image_mode must be either 'recognition' or 'normalized'")
     try:
         from src.preprocess.orchestrator import PreAgentOrchestrator
         from src.preprocess.schemas import UserPreprocessInput
@@ -232,17 +235,25 @@ def prepare_input_from_video(
     package = PreAgentOrchestrator(output_root=output_dir).run(input_data)
     package_dict = package.model_dump() if hasattr(package, "model_dump") else dict(package)
 
-    image_path = (
-        package_dict.get("normalized_sketch_path")
-        or package_dict.get("orientation_corrected_sketch_path")
+    recognition_image_path = (
+        package_dict.get("orientation_corrected_sketch_path")
         or package_dict.get("rectified_sketch_path")
         or package_dict.get("selected_sketch_path")
+        or package_dict.get("normalized_sketch_path")
     )
+    layout_image_path = package_dict.get("normalized_sketch_path")
+    if vision_image_mode == "normalized":
+        image_path = layout_image_path or recognition_image_path
+    else:
+        image_path = recognition_image_path or layout_image_path
     if not image_path:
         raise RuntimeError("Video preprocessing did not produce a sketch image")
 
     return {
         "image_path": image_path,
+        "vision_image_mode": vision_image_mode,
+        "recognition_image_path": recognition_image_path,
+        "layout_image_path": layout_image_path,
         "audio_path": package_dict.get("audio_path"),
         "text": user_text,
         "package_path": package_dict.get("package_path"),
@@ -278,6 +289,12 @@ def build_multimodal_prompt(
     ]
 
     if video_context:
+        if video_context.get("vision_image_mode"):
+            lines.append(f"vision_image_mode: {video_context['vision_image_mode']}")
+        if video_context.get("recognition_image_path"):
+            lines.append(f"recognition_image_path: {video_context['recognition_image_path']}")
+        if video_context.get("layout_image_path"):
+            lines.append(f"layout_image_path: {video_context['layout_image_path']}")
         platform_hint = video_context.get("platform_hint")
         if platform_hint:
             lines.append(f"platform_hint: {json.dumps(platform_hint, ensure_ascii=False)}")
@@ -305,10 +322,13 @@ def prepare_workflow_input(
     rotate_degrees: int = 180,
     orientation_correction_enabled: bool = True,
     enable_asr: bool = False,
+    vision_image_mode: str = "recognition",
 ) -> dict[str, Any]:
     """Prepare graph input state from image/video/audio paths."""
     user_text = text or DEFAULT_USER_TEXT
     preferred_locale = infer_preferred_locale(user_text)
+    if vision_image_mode not in {"recognition", "normalized"}:
+        raise ValueError("vision_image_mode must be either 'recognition' or 'normalized'")
     if not image_path and not video_path:
         raise ValueError("Either image_path or video_path must be provided")
 
@@ -324,6 +344,7 @@ def prepare_workflow_input(
             rotate_degrees=rotate_degrees,
             orientation_correction_enabled=orientation_correction_enabled,
             enable_asr=enable_asr,
+            vision_image_mode=vision_image_mode,
         )
         video_image_path = video_result["image_path"]
         audio_path = audio_path or video_result.get("audio_path")
@@ -359,6 +380,9 @@ def prepare_workflow_input(
         "TEAM_MEMBERS": _get_team_members(),
         "messages": [{"role": "user", "content": final_prompt}],
         "image_path": selected_image_path,
+        "recognition_image_path": (video_result or {}).get("recognition_image_path"),
+        "layout_image_path": (video_result or {}).get("layout_image_path"),
+        "vision_image_mode": (video_result or {}).get("vision_image_mode") or ("user_image" if not video_result else vision_image_mode),
         "voice_intent": None,
         "vision_elements": None,
         "vision_status": None,
@@ -374,6 +398,9 @@ def prepare_workflow_input(
         "state": state,
         "final_prompt": final_prompt,
         "selected_image_path": selected_image_path,
+        "recognition_image_path": (video_result or {}).get("recognition_image_path"),
+        "layout_image_path": (video_result or {}).get("layout_image_path"),
+        "vision_image_mode": (video_result or {}).get("vision_image_mode") or ("user_image" if not video_result else vision_image_mode),
         "selected_source": selected_source,
         "audio_path": audio_path,
         "video_result": video_result,

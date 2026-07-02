@@ -107,14 +107,16 @@ def test_prepare_input_from_video_reads_package(monkeypatch, tmp_path):
     video = tmp_path / "input.mp4"
     video.write_bytes(b"fake video")
     sketch = tmp_path / "normalized.png"
+    oriented = tmp_path / "oriented.png"
     audio = tmp_path / "audio.wav"
     Image.new("RGB", (390, 844), "white").save(sketch)
+    Image.new("RGB", (780, 1688), "white").save(oriented)
     audio.write_bytes(b"fake audio")
 
     fake_package = SimpleNamespace(
         model_dump=lambda: {
             "normalized_sketch_path": str(sketch),
-            "orientation_corrected_sketch_path": None,
+            "orientation_corrected_sketch_path": str(oriented),
             "rectified_sketch_path": None,
             "selected_sketch_path": str(sketch),
             "audio_path": str(audio),
@@ -142,6 +144,18 @@ def test_prepare_input_from_video_reads_package(monkeypatch, tmp_path):
         preprocess_output_dir=str(tmp_path),
     )
 
-    assert result["image_path"] == str(sketch)
+    assert result["image_path"] == str(oriented)
+    assert result["recognition_image_path"] == str(oriented)
+    assert result["layout_image_path"] == str(sketch)
+    assert result["vision_image_mode"] == "recognition"
     assert result["audio_path"] == str(audio)
     assert result["platform_hint"] == {"platform": "mobile"}
+
+    normalized_result = input_adapter.prepare_input_from_video(
+        video_path=str(video),
+        user_text="make UI",
+        preprocess_output_dir=str(tmp_path),
+        vision_image_mode="normalized",
+    )
+    assert normalized_result["image_path"] == str(sketch)
+    assert normalized_result["vision_image_mode"] == "normalized"
