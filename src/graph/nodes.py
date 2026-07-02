@@ -5,6 +5,7 @@ import base64
 import os
 from copy import deepcopy
 from typing import Literal
+from PIL import Image
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from langgraph.graph import END
@@ -23,6 +24,92 @@ from src.tools import vision_tool
 logger = logging.getLogger(__name__)
 
 RESPONSE_FORMAT = "Response from {}:\n\n<response>\n{}\n</response>\n\n*Please execute the next step.*"
+
+
+def _image_size(path: str | None) -> tuple[int, int] | None:
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with Image.open(path) as img:
+            return img.size
+    except Exception:
+        return None
+
+
+def _remap_vision_layout_to_layout_image(
+    vision_payload: dict,
+    recognition_image_path: str | None,
+    layout_image_path: str | None,
+) -> dict:
+    """Map bboxes from recognition-image space into normalized layout-image space.
+
+    The normalizer currently letterboxes the orientation-corrected recognition
+    image into the target layout canvas. Vision bboxes are normalized against the
+    recognition image, so this remaps them through the same scale and offset.
+    """
+    if not isinstance(vision_payload, dict) or not recognition_image_path or not layout_image_path:
+        return vision_payload
+    if os.path.abspath(recognition_image_path) == os.path.abspath(layout_image_path):
+        return vision_payload
+
+    recognition_size = _image_size(recognition_image_path)
+    layout_size = _image_size(layout_image_path)
+    if not recognition_size or not layout_size:
+        return vision_payload
+
+    rec_w, rec_h = recognition_size
+    layout_w, layout_h = layout_size
+    if rec_w <= 0 or rec_h <= 0 or layout_w <= 0 or layout_h <= 0:
+        return vision_payload
+
+    scale = min(layout_w / rec_w, layout_h / rec_h)
+    resized_w = rec_w * scale
+    resized_h = rec_h * scale
+    offset_x = (layout_w - resized_w) / 2.0
+    offset_y = (layout_h - resized_h) / 2.0
+
+    mapped = deepcopy(vision_payload)
+    mapped["canvas"] = {
+        "width": int(layout_w),
+        "height": int(layout_h),
+        "orientation": "portrait" if layout_h > layout_w else ("landscape" if layout_w > layout_h else "square"),
+    }
+
+    for element in mapped.get("elements", []) or []:
+        bbox = element.get("bbox")
+        if not isinstance(bbox, dict):
+            continue
+        try:
+            x_min = float(bbox["x_min"]) * rec_w
+            y_min = float(bbox["y_min"]) * rec_h
+            x_max = float(bbox["x_max"]) * rec_w
+            y_max = float(bbox["y_max"]) * rec_h
+        except Exception:
+            continue
+
+        lx_min = (x_min * scale + offset_x) / layout_w
+        ly_min = (y_min * scale + offset_y) / layout_h
+        lx_max = (x_max * scale + offset_x) / layout_w
+        ly_max = (y_max * scale + offset_y) / layout_h
+
+        element["bbox"] = {
+            "x_min": round(max(0.0, min(1.0, lx_min)), 6),
+            "y_min": round(max(0.0, min(1.0, ly_min)), 6),
+            "x_max": round(max(0.0, min(1.0, lx_max)), 6),
+            "y_max": round(max(0.0, min(1.0, ly_max)), 6),
+        }
+        element["source"] = element.get("source") or "vision"
+
+    mapped["coordinate_mapping"] = {
+        "source": "recognition_to_layout_letterbox",
+        "recognition_image_path": recognition_image_path,
+        "layout_image_path": layout_image_path,
+        "recognition_size": [rec_w, rec_h],
+        "layout_size": [layout_w, layout_h],
+        "scale": scale,
+        "offset": [offset_x, offset_y],
+    }
+    return mapped
 
 
 def research_node(state: State) -> Command[Literal["supervisor"]]:
@@ -617,6 +704,15 @@ def vision_node(state: State) -> Command[Literal["supervisor"]]:
         if choose_second:
             validated, validation = validated2, validation2
             raw_out = raw_out2
+
+    layout_image_path = state.get("layout_image_path")
+    recognition_image_path = state.get("recognition_image_path") or image_path
+    if validation.valid and layout_image_path and recognition_image_path:
+        validated = _remap_vision_layout_to_layout_image(
+            validated,
+            recognition_image_path=recognition_image_path,
+            layout_image_path=layout_image_path,
+        )
 
     # Log and save snapshot
     try:

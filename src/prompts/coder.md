@@ -19,16 +19,23 @@ You will receive a `UI-State JSON Schema v1` object.
 5. Use UI labels and placeholder text in `page_meta.locale` by default.
 6. Preserve explicit business terms from the input unless the requested locale clearly requires English wording.
 7. Use `position: absolute` for element placement.
-8. Convert bbox exactly:
+8. Use bbox as the authoritative placement anchor:
    - `left = x_min`
    - `top = y_min`
-   - `width = x_max - x_min`
-   - `height = y_max - y_min`
+   - start with `width = x_max - x_min`
+   - start with `height = y_max - y_min`
+   - you may expand width/height slightly when the bbox is too small for readable text or tappable controls.
 9. Do not swap x/y coordinates.
 10. Do not use `transform: translate(...)` to center elements.
 11. If an element has `rpa_action`, bind `onclick="handleRPA('action_id')"`.
 12. Include a small `handleRPA(action)` JavaScript function.
-13. Keep text readable inside each element and avoid content overflowing its bbox.
+13. Keep text readable and avoid overlap:
+    - Buttons should have at least `44px` height where space permits.
+    - Buttons should have enough width for their label; do not squeeze labels like "加入购物车" into unreadable boxes.
+    - If two adjacent buttons would overlap after expansion, arrange them as a bottom action row while preserving their left-to-right order.
+    - Text labels may use `white-space: nowrap`, `overflow: hidden`, and `text-overflow: ellipsis`; critical CTA labels must remain fully visible.
+    - Do not let one element visually cover another element unless the UI-State clearly describes a modal or overlay.
+14. For mobile product-detail pages, prefer a usable product-page composition over tiny literal boxes: top navigation, product image, product info, service/spec rows, and bottom action buttons should be legible and tappable.
 
 # Output
 Return a complete HTML document starting with `<!DOCTYPE html>` and ending with `</html>`.

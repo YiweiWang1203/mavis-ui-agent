@@ -106,3 +106,34 @@ def test_retry_once_on_sparse(monkeypatch, tmp_path):
     # Expect two calls (first + retry)
     assert 'vision_elements' in cmd.update
     assert cmd.update['vision_status']['valid'] is True
+
+
+def test_remap_vision_layout_to_layout_image_letterbox(tmp_path):
+    recognition = tmp_path / "oriented.png"
+    layout = tmp_path / "normalized.png"
+    Image.new("RGB", (800, 800), "white").save(recognition)
+    Image.new("RGB", (400, 800), "white").save(layout)
+    payload = {
+        "schema_version": "1.0",
+        "canvas": {"width": 800, "height": 800, "orientation": "square"},
+        "elements": [
+            {
+                "id": "e1",
+                "type": "button",
+                "text": "Buy",
+                "bbox": {"x_min": 0.25, "y_min": 0.25, "x_max": 0.75, "y_max": 0.75},
+            }
+        ],
+        "reading_order": ["e1"],
+    }
+
+    remapped = nodes._remap_vision_layout_to_layout_image(
+        payload,
+        recognition_image_path=str(recognition),
+        layout_image_path=str(layout),
+    )
+
+    assert remapped["canvas"] == {"width": 400, "height": 800, "orientation": "portrait"}
+    bbox = remapped["elements"][0]["bbox"]
+    assert bbox == {"x_min": 0.25, "y_min": 0.375, "x_max": 0.75, "y_max": 0.625}
+    assert remapped["coordinate_mapping"]["source"] == "recognition_to_layout_letterbox"
