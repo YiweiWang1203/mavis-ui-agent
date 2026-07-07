@@ -106,10 +106,6 @@ def _normalize_element(raw: dict, canvas_w: int, canvas_h: int, idx: int) -> Tup
 
     if 'description' in raw:
         el['description'] = raw['description']
-    if 'semantic_role' in raw:
-        el['semantic_role'] = raw['semantic_role']
-    if 'rpa_action' in raw:
-        el['rpa_action'] = raw['rpa_action']
 
     # confidence
     try:
