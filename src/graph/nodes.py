@@ -112,6 +112,148 @@ def _remap_vision_layout_to_layout_image(
     return mapped
 
 
+def _bbox_center_y(element: dict) -> float:
+    bbox = element.get("bbox") or {}
+    try:
+        return (float(bbox.get("y_min", 0.0)) + float(bbox.get("y_max", 0.0))) / 2.0
+    except Exception:
+        return 0.0
+
+
+def _bbox_center_x(element: dict) -> float:
+    bbox = element.get("bbox") or {}
+    try:
+        return (float(bbox.get("x_min", 0.0)) + float(bbox.get("x_max", 0.0))) / 2.0
+    except Exception:
+        return 0.0
+
+
+def _ordered_vision_elements(payload: dict) -> list[dict]:
+    elements = payload.get("elements") or []
+    by_id = {element.get("id"): element for element in elements if isinstance(element, dict)}
+    reading_order = payload.get("reading_order") or []
+    ordered = [by_id[element_id] for element_id in reading_order if element_id in by_id]
+    used = {element.get("id") for element in ordered}
+    ordered.extend(
+        sorted(
+            [element for element in elements if isinstance(element, dict) and element.get("id") not in used],
+            key=lambda element: (_bbox_center_y(element), _bbox_center_x(element)),
+        )
+    )
+    return ordered
+
+
+def _semantic_candidate_for_layout(
+    layout_element: dict,
+    semantic_elements: list[dict],
+    start_index: int,
+) -> tuple[dict | None, int]:
+    layout_type = str(layout_element.get("type") or "")
+    preferred_types = {
+        "button": {"button", "text"},
+        "text": {"text", "button", "unknown"},
+        "image": {"image", "unknown"},
+        "icon": {"icon", "button", "unknown"},
+        "icon_button": {"icon", "button", "unknown"},
+    }.get(layout_type, {layout_type, "unknown", "text"})
+
+    search_window = semantic_elements[start_index : min(len(semantic_elements), start_index + 3)]
+    for offset, candidate in enumerate(search_window):
+        candidate_type = str(candidate.get("type") or "")
+        if candidate_type in preferred_types:
+            return candidate, start_index + offset + 1
+    if start_index < len(semantic_elements):
+        return semantic_elements[start_index], start_index + 1
+    return None, start_index
+
+
+def _merge_geometry_and_semantics(layout_payload: dict, semantic_payload: dict) -> dict:
+    """Use layout-pass bboxes and recognition-pass semantic fields."""
+    merged = deepcopy(layout_payload)
+    layout_elements = _ordered_vision_elements(merged)
+    semantic_elements = _ordered_vision_elements(semantic_payload)
+
+    semantic_index = 0
+    for layout_element in layout_elements:
+        semantic_element, semantic_index = _semantic_candidate_for_layout(
+            layout_element,
+            semantic_elements,
+            semantic_index,
+        )
+        if not semantic_element:
+            continue
+
+        for field in ("text", "description", "semantic_role", "rpa_action"):
+            value = semantic_element.get(field)
+            if value not in (None, ""):
+                layout_element[field] = value
+
+        semantic_type = semantic_element.get("type")
+        if layout_element.get("type") in (None, "unknown") and semantic_type:
+            layout_element["type"] = semantic_type
+        layout_element["semantic_source_id"] = semantic_element.get("id")
+
+    merged["vision_fusion"] = {
+        "mode": "dual_pass_geometry_semantics",
+        "geometry_source": "layout_image",
+        "semantic_source": "recognition_image",
+        "layout_element_count": len(layout_payload.get("elements") or []),
+        "semantic_element_count": len(semantic_payload.get("elements") or []),
+    }
+    return merged
+
+
+def _run_vision_extraction_pass(
+    *,
+    image_path: str,
+    user_context: str,
+    audit_logger,
+) -> tuple[dict, object, str, int, dict]:
+    retry_count = 0
+    max_retries = 1
+    complexity = vision_tool.analyze_image_complexity(image_path)
+
+    try:
+        raw_out = vision_tool.extract_ui_layout(
+            image_path=image_path,
+            user_context=user_context,
+            previous_layout=None,
+            repair_feedback=None,
+            audit_logger=audit_logger,
+        )
+    except TypeError:
+        raw_out = vision_tool.extract_ui_layout(image_path, user_context, audit_logger)
+
+    validated, validation = vision_tool.validate_vision_layout(raw_out, image_path=image_path)
+    if (not validation.valid or validation.completeness_score < float(os.getenv("VISION_COMPLETENESS_THRESHOLD", "0.5"))) and retry_count < max_retries:
+        retry_count += 1
+        repair_feedback = {
+            "previous_validation": validation.model_dump() if hasattr(validation, "model_dump") else getattr(validation, "__dict__", None),
+            "previous_diagnostics": raw_out.get("diagnostics") if isinstance(raw_out, dict) else None,
+            "complexity": complexity,
+        }
+        try:
+            raw_out2 = vision_tool.extract_ui_layout(
+                image_path=image_path,
+                user_context=user_context,
+                previous_layout=raw_out.get("payload") if isinstance(raw_out, dict) else None,
+                repair_feedback=repair_feedback,
+                audit_logger=audit_logger,
+            )
+        except TypeError:
+            raw_out2 = vision_tool.extract_ui_layout(image_path, user_context, audit_logger)
+        validated2, validation2 = vision_tool.validate_vision_layout(raw_out2, image_path=image_path)
+        try:
+            choose_second = vision_tool.select_better_vision_result(validated, validation, validated2, validation2, complexity=complexity)
+        except Exception:
+            choose_second = False
+        if choose_second:
+            validated, validation = validated2, validation2
+            raw_out = raw_out2
+
+    return validated, validation, str(raw_out), retry_count, complexity
+
+
 def research_node(state: State) -> Command[Literal["supervisor"]]:
     """Node for the researcher agent that performs research tasks."""
     logger.info("Research agent starting task")
@@ -651,67 +793,69 @@ def vision_node(state: State) -> Command[Literal["supervisor"]]:
             "messages": [HumanMessage(content=msg, name="vision")]
         }, goto="supervisor")
 
-    # Do not mutate state in place; prepare updates via Command
-    max_retries = 1
-    retry_count = 0
     audit = al
-
-    # First extraction
-    # compute image complexity metrics
-    complexity = vision_tool.analyze_image_complexity(image_path)
-
-    try:
-        raw_out = vision_tool.extract_ui_layout(
-            image_path=image_path,
-            user_context=state.get('voice_intent') or user_content,
-            previous_layout=None,
-            repair_feedback=None,
-            audit_logger=audit
-        )
-    except TypeError:
-        # backward-compatible call for tests or older stubs
-        raw_out = vision_tool.extract_ui_layout(image_path, state.get('voice_intent') or user_content, audit)
-    # validate
-    validated, validation = vision_tool.validate_vision_layout(raw_out, image_path=image_path)
-
-    # If invalid or low completeness, attempt one repair/retry
-    if (not validation.valid or validation.completeness_score < float(os.getenv('VISION_COMPLETENESS_THRESHOLD', '0.5'))) and retry_count < max_retries:
-        retry_count += 1
-        # prepare repair feedback object
-        repair_feedback = {
-            'previous_validation': validation.model_dump() if hasattr(validation, 'model_dump') else getattr(validation, '__dict__', None),
-            'previous_diagnostics': raw_out.get('diagnostics') if isinstance(raw_out, dict) else None,
-            'complexity': complexity,
-        }
-        try:
-            raw_out2 = vision_tool.extract_ui_layout(
-                image_path=image_path,
-                user_context=state.get('voice_intent') or user_content,
-                previous_layout=raw_out.get('payload') if isinstance(raw_out, dict) else None,
-                repair_feedback=repair_feedback,
-                audit_logger=audit
-            )
-        except TypeError:
-            # fallback for tests/mocks
-            raw_out2 = vision_tool.extract_ui_layout(image_path, state.get('voice_intent') or user_content, audit)
-        validated2, validation2 = vision_tool.validate_vision_layout(raw_out2, image_path=image_path)
-        # choose better result using deterministic comparator
-        try:
-            choose_second = vision_tool.select_better_vision_result(validated, validation, validated2, validation2, complexity=complexity)
-        except Exception:
-            choose_second = False
-
-        if choose_second:
-            validated, validation = validated2, validation2
-            raw_out = raw_out2
-
     layout_image_path = state.get("layout_image_path")
     recognition_image_path = state.get("recognition_image_path") or image_path
-    if validation.valid and layout_image_path and recognition_image_path:
-        validated = _remap_vision_layout_to_layout_image(
-            validated,
-            recognition_image_path=recognition_image_path,
-            layout_image_path=layout_image_path,
+    user_context = state.get('voice_intent') or user_content
+
+    semantic_context = (
+        f"{user_context}\n\n"
+        "[VISION PASS]\n"
+        "semantic_extraction: Read the corrected high-resolution sketch. "
+        "Prioritize exact visible text, product-detail semantics, button labels, and intended actions. "
+        "Bboxes may be tight around visible marks."
+    )
+    layout_context = (
+        f"{user_context}\n\n"
+        "[VISION PASS]\n"
+        "geometry_extraction: Read the normalized layout sketch. "
+        "Prioritize full UI regions and stable bounding boxes. "
+        "Do not overfit to tiny text strokes; identify the component area that should be rendered."
+    )
+
+    semantic_validated, semantic_validation, semantic_raw, semantic_retries, semantic_complexity = _run_vision_extraction_pass(
+        image_path=image_path,
+        user_context=semantic_context,
+        audit_logger=audit,
+    )
+
+    validated = semantic_validated
+    validation = semantic_validation
+    raw_out = {"semantic": semantic_raw}
+    retry_count = semantic_retries
+    complexity = semantic_complexity
+    layout_validation = None
+    fusion_mode = "semantic_only"
+
+    if layout_image_path and recognition_image_path and os.path.exists(layout_image_path) and os.path.abspath(layout_image_path) != os.path.abspath(image_path):
+        layout_validated, layout_validation, layout_raw, layout_retries, _layout_complexity = _run_vision_extraction_pass(
+            image_path=layout_image_path,
+            user_context=layout_context,
+            audit_logger=audit,
+        )
+        raw_out = {"semantic": semantic_raw, "layout": layout_raw}
+        retry_count += layout_retries
+        if layout_validation.valid:
+            validated = _merge_geometry_and_semantics(layout_validated, semantic_validated)
+            validation = layout_validation
+            fusion_mode = "dual_pass_geometry_semantics"
+        elif semantic_validation.valid:
+            validated = _remap_vision_layout_to_layout_image(
+                semantic_validated,
+                recognition_image_path=recognition_image_path,
+                layout_image_path=layout_image_path,
+            )
+            validation = semantic_validation
+            fusion_mode = "semantic_remapped_fallback"
+
+    if isinstance(validated, dict):
+        validated.setdefault("vision_fusion", {})
+        validated["vision_fusion"].update(
+            {
+                "mode": fusion_mode,
+                "recognition_image_path": recognition_image_path,
+                "layout_image_path": layout_image_path,
+            }
         )
 
     # Log and save snapshot
@@ -725,6 +869,8 @@ def vision_node(state: State) -> Command[Literal["supervisor"]]:
                 'validation_errors': validation.errors,
                 'validation_warnings': validation.warnings,
                 'retry_count': retry_count,
+                'fusion_mode': fusion_mode,
+                'layout_validation': layout_validation.model_dump() if layout_validation and hasattr(layout_validation, 'model_dump') else None,
             })
             audit.save_state_snapshot('vision_elements_saved', validated)
     except Exception:

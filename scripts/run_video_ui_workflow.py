@@ -104,6 +104,7 @@ def run_full_graph(prepared: dict[str, Any]) -> dict[str, Any]:
 
 def _summary(prepared: dict[str, Any], final_state: dict[str, Any], mode: str) -> dict[str, Any]:
     ui_state = final_state.get("ui_state_json") if isinstance(final_state.get("ui_state_json"), dict) else {}
+    vision_elements = final_state.get("vision_elements") if isinstance(final_state.get("vision_elements"), dict) else {}
     return {
         "mode": mode,
         "selected_image_path": prepared.get("selected_image_path"),
@@ -115,6 +116,7 @@ def _summary(prepared: dict[str, Any], final_state: dict[str, Any], mode: str) -
         "package_path": prepared.get("package_path"),
         "preferred_locale": prepared.get("preferred_locale"),
         "vision_status": final_state.get("vision_status"),
+        "vision_fusion": vision_elements.get("vision_fusion"),
         "ui_state_json_present": final_state.get("ui_state_json") is not None,
         "ui_page_kind": ui_state.get("page_meta", {}).get("page_kind"),
         "ui_warnings": ui_state.get("warnings", []),

@@ -137,3 +137,42 @@ def test_remap_vision_layout_to_layout_image_letterbox(tmp_path):
     bbox = remapped["elements"][0]["bbox"]
     assert bbox == {"x_min": 0.25, "y_min": 0.375, "x_max": 0.75, "y_max": 0.625}
     assert remapped["coordinate_mapping"]["source"] == "recognition_to_layout_letterbox"
+
+
+def test_merge_geometry_and_semantics_keeps_layout_bbox_and_semantic_text():
+    layout = {
+        "canvas": {"width": 390, "height": 844, "orientation": "portrait"},
+        "elements": [
+            {
+                "id": "g1",
+                "type": "button",
+                "text": "",
+                "bbox": {"x_min": 0.1, "y_min": 0.8, "x_max": 0.45, "y_max": 0.9},
+            }
+        ],
+        "reading_order": ["g1"],
+    }
+    semantic = {
+        "canvas": {"width": 1200, "height": 1600, "orientation": "portrait"},
+        "elements": [
+            {
+                "id": "s1",
+                "type": "button",
+                "text": "加入购物车",
+                "semantic_role": "add_to_cart",
+                "rpa_action": "add_to_cart",
+                "bbox": {"x_min": 0.3, "y_min": 0.75, "x_max": 0.38, "y_max": 0.78},
+            }
+        ],
+        "reading_order": ["s1"],
+    }
+
+    merged = nodes._merge_geometry_and_semantics(layout, semantic)
+    element = merged["elements"][0]
+
+    assert element["bbox"] == layout["elements"][0]["bbox"]
+    assert element["text"] == "加入购物车"
+    assert element["semantic_role"] == "add_to_cart"
+    assert element["rpa_action"] == "add_to_cart"
+    assert element["semantic_source_id"] == "s1"
+    assert merged["vision_fusion"]["mode"] == "dual_pass_geometry_semantics"
