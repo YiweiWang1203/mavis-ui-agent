@@ -122,3 +122,16 @@ def test_ui_prior_does_not_force_back_on_mobile_home_page():
     result = apply_ui_priors(ui_state, user_intent="移动端首页")
 
     assert result["elements"] == []
+
+
+def test_page_kind_can_be_inferred_from_element_evidence():
+    ui_state = {
+        "page_meta": {"inferred_device": "mobile", "viewport": {"width": 375, "height": 812}},
+        "elements": [
+            {"id": "hero", "type": "image", "text": "商品图片"},
+            {"id": "cart", "type": "button", "text": "加入购物车", "rpa_action": "add_to_cart"},
+            {"id": "price", "type": "text", "text": "价格 59.65"},
+        ],
+    }
+
+    assert infer_page_kind("请生成这个界面", ui_state) == "mobile_product_detail"

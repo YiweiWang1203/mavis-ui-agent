@@ -775,11 +775,13 @@ def code_node(state: State) -> Command[Literal["supervisor"]]:
     # 处理返回结果
     if isinstance(result, dict):
         code_str = result.get("code", "")
+        renderer = result.get("renderer", "llm")
         file_path = result.get("file_path", "未找到路径 (可能已保存在默认目录)")
         final_code = code_str
         content = f"已根据 UI-State JSON 生成前端代码。"
     else:
         code_str = str(result)
+        renderer = "llm"
         file_path = "未找到路径"
         final_code = code_str
         content = code_str
@@ -796,6 +798,7 @@ def code_node(state: State) -> Command[Literal["supervisor"]]:
             ],
             "final_code": final_code, # 🌟 把核心资产装入主状态
             "final_code_path": file_path,
+            "final_renderer": renderer,
         },
         goto="supervisor",
     )

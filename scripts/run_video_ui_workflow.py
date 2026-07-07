@@ -79,6 +79,7 @@ def run_deterministic_pipeline(prepared: dict[str, Any]) -> dict[str, Any]:
     state.update(coder_cmd.update)
     print("final_code_path:", state.get("final_code_path"))
     print("final_code_length:", len(state.get("final_code") or ""))
+    print("final_renderer:", state.get("final_renderer"))
     return state
 
 
@@ -123,6 +124,7 @@ def _summary(prepared: dict[str, Any], final_state: dict[str, Any], mode: str) -
         "final_code_present": final_state.get("final_code") is not None,
         "final_code_length": len(final_state.get("final_code") or ""),
         "final_code_path": final_state.get("final_code_path"),
+        "final_renderer": final_state.get("final_renderer"),
     }
 
 
@@ -142,6 +144,12 @@ def main() -> int:
         help="Disable relational layout solving for an A/B comparison with raw vision bboxes.",
     )
     parser.add_argument(
+        "--renderer",
+        choices=["auto", "deterministic", "llm"],
+        default="auto",
+        help="Use deterministic rendering for supported pages, force it, or retain the LLM coder.",
+    )
+    parser.add_argument(
         "--vision-image-mode",
         choices=["recognition", "normalized"],
         default="recognition",
@@ -152,6 +160,7 @@ def main() -> int:
 
     if args.disable_layout_solver:
         os.environ["LAYOUT_SOLVER_ENABLED"] = "0"
+    os.environ["UI_RENDERER_MODE"] = args.renderer
 
     prepared = prepare_workflow_input(
         text=args.prompt,
@@ -172,6 +181,7 @@ def main() -> int:
     print("audio_path:", prepared["audio_path"])
     print("preferred_locale:", prepared["preferred_locale"])
     print("layout_solver_enabled:", not args.disable_layout_solver)
+    print("renderer:", args.renderer)
 
     mode = "full_graph" if args.full_graph else "deterministic"
     final_state = run_full_graph(prepared) if args.full_graph else run_deterministic_pipeline(prepared)

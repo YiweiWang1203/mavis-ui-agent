@@ -27,6 +27,31 @@ def infer_page_kind(user_intent: str | None, ui_state: dict[str, Any] | None = N
         markers = spec.get("intent_markers", [])
         if any(str(marker).lower() in text for marker in markers):
             return page_kind
+
+    elements = (ui_state or {}).get("elements", [])
+    if isinstance(elements, list):
+        evidence = " ".join(
+            " ".join(
+                str(element.get(key) or "")
+                for key in ("type", "text", "semantic_role", "rpa_action")
+            ).lower()
+            for element in elements
+            if isinstance(element, dict)
+        )
+        commerce_markers = (
+            "购物车", "立即购买", "立即下单", "价格", "商品", "尺码",
+            "add_to_cart", "buy_now", "place_order", "product", "price",
+        )
+        score = sum(1 for marker in commerce_markers if marker in evidence)
+        has_image = any(
+            isinstance(element, dict) and str(element.get("type") or "").lower() == "image"
+            for element in elements
+        )
+        has_action = any(
+            marker in evidence for marker in ("购物车", "立即购买", "立即下单", "add_to_cart", "buy_now", "place_order")
+        )
+        if has_image and has_action and score >= 2:
+            return "mobile_product_detail"
     return None
 
 

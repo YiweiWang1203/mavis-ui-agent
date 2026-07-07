@@ -62,6 +62,17 @@ def save_html_asset(code: str) -> str | None:
 
 def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str:
     """Generate runnable frontend HTML from a UI-State JSON contract."""
+    renderer_mode = os.getenv("UI_RENDERER_MODE", "auto").strip().lower()
+    if renderer_mode in {"auto", "deterministic"}:
+        from src.renderers import render_ui_state_html, supports_deterministic_rendering
+
+        supported = supports_deterministic_rendering(ui_state_json)
+        if renderer_mode == "deterministic" or supported:
+            code = render_ui_state_html(ui_state_json)
+            saved_path = save_html_asset(code)
+            logging.getLogger(__name__).info("Deterministic HTML asset saved to: %s", saved_path)
+            return {"code": code, "file_path": saved_path, "renderer": "deterministic"}
+
     system_prompt = read_coder_prompt()
     user_content = (
         "Generate runnable frontend code from the following UI-State JSON.\n\n"

@@ -222,8 +222,8 @@ Return the final fused UI-State JSON.
             vision_elements,
             preferred_locale or infer_locale_from_text(user_intent),
         )
-        solved = solve_ui_layout(repaired)
-        return apply_ui_priors(solved, user_intent=user_intent, vision_elements=vision_elements)
+        priorized = apply_ui_priors(repaired, user_intent=user_intent, vision_elements=vision_elements)
+        return solve_ui_layout(priorized)
 
     except json.JSONDecodeError as exc:
         print(f"UI Architect JSON parse failed: {exc}")
