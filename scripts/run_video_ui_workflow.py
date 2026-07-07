@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -117,6 +118,7 @@ def _summary(prepared: dict[str, Any], final_state: dict[str, Any], mode: str) -
         "vision_status": final_state.get("vision_status"),
         "ui_state_json_present": final_state.get("ui_state_json") is not None,
         "ui_page_kind": ui_state.get("page_meta", {}).get("page_kind"),
+        "layout_solver": ui_state.get("page_meta", {}).get("layout_solver"),
         "ui_warnings": ui_state.get("warnings", []),
         "final_code_present": final_state.get("final_code") is not None,
         "final_code_length": len(final_state.get("final_code") or ""),
@@ -135,6 +137,11 @@ def main() -> int:
     parser.add_argument("--disable-orientation-correction", action="store_true")
     parser.add_argument("--enable-asr", action="store_true", help="Enable ASR during preprocessing")
     parser.add_argument(
+        "--disable-layout-solver",
+        action="store_true",
+        help="Disable relational layout solving for an A/B comparison with raw vision bboxes.",
+    )
+    parser.add_argument(
         "--vision-image-mode",
         choices=["recognition", "normalized"],
         default="recognition",
@@ -142,6 +149,9 @@ def main() -> int:
     )
     parser.add_argument("--full-graph", action="store_true", help="Run the planner/supervisor LangGraph instead of the deterministic pipeline")
     args = parser.parse_args()
+
+    if args.disable_layout_solver:
+        os.environ["LAYOUT_SOLVER_ENABLED"] = "0"
 
     prepared = prepare_workflow_input(
         text=args.prompt,
@@ -161,6 +171,7 @@ def main() -> int:
     print("vision_image_mode:", prepared.get("vision_image_mode"))
     print("audio_path:", prepared["audio_path"])
     print("preferred_locale:", prepared["preferred_locale"])
+    print("layout_solver_enabled:", not args.disable_layout_solver)
 
     mode = "full_graph" if args.full_graph else "deterministic"
     final_state = run_full_graph(prepared) if args.full_graph else run_deterministic_pipeline(prepared)

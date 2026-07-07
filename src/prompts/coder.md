@@ -9,6 +9,9 @@ You will receive a `UI-State JSON Schema v1` object.
 - `page_meta.locale`: target UI language, usually `zh-CN` or `en`.
 - `elements`: UI elements to render.
 - `spatial_info.bbox`: pixel coordinates in `[x_min, y_min, x_max, y_max]` order.
+- `spatial_info.evidence_bbox`: the original visual evidence box; do not use it for rendering.
+- `typography`: deterministic font-size, line-count, and wrapping hints.
+- `layout_relations`: alignment and same-row constraints.
 - `rpa_action`: optional action id to bind to a mock click handler.
 
 # Requirements
@@ -25,6 +28,8 @@ You will receive a `UI-State JSON Schema v1` object.
    - start with `width = x_max - x_min`
    - start with `height = y_max - y_min`
    - you may expand width/height slightly when the bbox is too small for readable text or tappable controls.
+   - when `spatial_info.source` is `constraint_layout_solver`, do not replace or shrink its bbox.
+   - honor `typography.font_size_px`, `typography.line_count`, and `typography.wrap`.
 9. Do not swap x/y coordinates.
 10. Do not use `transform: translate(...)` to center elements.
 11. If an element has `rpa_action`, bind `onclick="handleRPA('action_id')"`.

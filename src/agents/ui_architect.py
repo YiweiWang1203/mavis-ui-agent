@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from src.priors import apply_ui_priors
+from src.utils.layout_solver import solve_ui_layout
 
 try:
     from dotenv import load_dotenv
@@ -221,7 +222,8 @@ Return the final fused UI-State JSON.
             vision_elements,
             preferred_locale or infer_locale_from_text(user_intent),
         )
-        return apply_ui_priors(repaired, user_intent=user_intent, vision_elements=vision_elements)
+        solved = solve_ui_layout(repaired)
+        return apply_ui_priors(solved, user_intent=user_intent, vision_elements=vision_elements)
 
     except json.JSONDecodeError as exc:
         print(f"UI Architect JSON parse failed: {exc}")
