@@ -72,6 +72,14 @@ data/input/audio_raw/
 # Local debugging artifacts
 debug_vision_output.json
 
+# Local review snapshot and security audit artifacts
+*.local.json
+review-staging/
+security-audit/
+gitleaks-*.json
+snapshot-report*.json
+redactions*.json
+
 # Preserve required directory structure
 !data/input/models/.gitkeep
 !data/input/video/.gitkeep

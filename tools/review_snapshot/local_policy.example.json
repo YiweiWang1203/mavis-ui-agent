@@ -1,0 +1,30 @@
+{
+  "forbidden_literals": [
+    "<PRIVATE_EMAIL>",
+    "<PRIVATE_PHONE>",
+    "<PRIVATE_IP>"
+  ],
+  "literal_replacements": [
+    {
+      "from": "<LOCAL_PROJECT_ROOT>",
+      "to": "<LOCAL_PROJECT_ROOT>"
+    },
+    {
+      "from": "<REMOTE_PROJECT_ROOT>",
+      "to": "<REMOTE_PROJECT_ROOT>"
+    },
+    {
+      "from": "<PRIVATE_HOST>",
+      "to": "<REMOTE_HOST>"
+    },
+    {
+      "from": "<PRIVATE_USER>",
+      "to": "<REMOTE_USER>"
+    },
+    {
+      "from": "<SSH_IDENTITY_FILE>",
+      "to": "<SSH_KEY_PATH>"
+    }
+  ]
+}
+
