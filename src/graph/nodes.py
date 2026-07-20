@@ -20,6 +20,7 @@ from .types import State, Router
 from src.agents.ui_architect import generate_ui_state
 from src.utils.audit_logger import AuditLogger
 from src.tools import vision_tool
+from src.tools.vision_ontology_adapter import convert_vision_payload_to_ontology
 
 logger = logging.getLogger(__name__)
 
@@ -734,15 +735,19 @@ def vision_node(state: State) -> Command[Literal["supervisor"]]:
         return Command(update={
             'image_path': image_path,
             'vision_elements': None,
+            'vision_elements_v0_1': None,
             'vision_status': validation.model_dump() if hasattr(validation, 'model_dump') else validation.__dict__,
             'vision_raw_output': str(raw_out),
             'vision_retry_count': retry_count,
             'messages': [HumanMessage(content='Vision extraction failed validation and aborted.', name='vision')]
         }, goto='supervisor')
 
+    vision_elements_v0_1 = convert_vision_payload_to_ontology(validated)
+
     return Command(update={
         'image_path': image_path,
         'vision_elements': validated,
+        'vision_elements_v0_1': vision_elements_v0_1,
         'vision_status': validation.model_dump() if hasattr(validation, 'model_dump') else validation.__dict__,
         'vision_raw_output': str(raw_out),
         'vision_retry_count': retry_count,

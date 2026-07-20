@@ -13,6 +13,7 @@ class GraphState(TypedDict):
     # 各个专家的中间产物
     voice_intent: Optional[str]        # Meeting Agent 的结果
     vision_elements: Optional[dict]    # Vision Agent 的坐标结果
+    vision_elements_v0_1: Optional[dict]
     ui_state_json: Optional[dict]      # UI Architect 融合后的契约
     
     # 最终代码

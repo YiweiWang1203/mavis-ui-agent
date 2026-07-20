@@ -27,6 +27,7 @@ class State(MessagesState):
     voice_intent: Optional[str]        # 存储提取出的语音意图
     image_path: Optional[str]
     vision_elements: Optional[dict]    # 存储提取出的控件坐标字典 (VisionLayout.dict())
+    vision_elements_v0_1: Optional[dict]
     vision_status: Optional[dict]
     vision_raw_output: Optional[str]
     vision_retry_count: int
