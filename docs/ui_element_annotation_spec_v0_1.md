@@ -47,6 +47,19 @@ Examples:
 - `ID信息`
 - `分割线`
 
+## Current drawio Style Fallbacks
+
+These style fallbacks exist to support current manual drawio samples. Prefer the standard key/value label format for new annotations.
+
+- Green stroke `strokeColor=#00CC00`: `text`
+- Red circular cell `strokeColor=#FF0000` plus `ellipse`: `icon`, `shape=circle`, `interactive=true`
+- Red circular cell with `头像`: `image`, `shape=circle`
+- Blue stroke `strokeColor=#0000FF`: `image` fallback
+- Blue stroke with `卡片`, `区域`, `内容展示`, `商品卡片`, or `可交互商品卡片`: keyword fallback wins, so the element remains `region`
+- Large blank phone/screen background rectangles are treated as canvas cells, not UI elements
+- Cells outside the detected canvas are treated as legends or annotation examples and are not parsed
+- `style=group` cells are drawio structure only and are not parsed as UI elements
+
 ## Out Of Scope
 
 Manual visual annotations must not label business semantics:
