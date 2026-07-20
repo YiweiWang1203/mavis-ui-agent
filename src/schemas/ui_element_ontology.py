@@ -37,9 +37,23 @@ class UIElementOntologyElement(BaseModel):
     children_ids: list[str] = Field(default_factory=list)
 
 
+class CanvasInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    width: float
+    height: float
+
+    @model_validator(mode="after")
+    def check_dims(self):
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError("canvas width and height must be > 0")
+        return self
+
+
 class UIElementOntologyPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["ui_element_ontology_v0.1"] = "ui_element_ontology_v0.1"
+    canvas: Optional[CanvasInfo] = None
     metadata: dict = Field(default_factory=dict)
     elements: list[UIElementOntologyElement]
