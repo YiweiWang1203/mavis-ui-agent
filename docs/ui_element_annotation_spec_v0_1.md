@@ -60,6 +60,20 @@ These style fallbacks exist to support current manual drawio samples. Prefer the
 - Cells outside the detected canvas are treated as legends or annotation examples and are not parsed
 - `style=group` cells are drawio structure only and are not parsed as UI elements
 
+## OCR Preservation Principle
+
+The Vision layer does not assign `semantic_role`, but it must preserve OCR and handwritten text as completely as possible.
+
+For `type=text` elements, `text_content` is a core field and should not be ignored during annotation, parsing, prediction export, or evaluation.
+
+OCR confidence may be used only as a diagnostic signal or as a weighting feature in later stages. It must not be used to delete or suppress `text_content` in the visual-layer ontology.
+
+When OCR confidence is low, keep the original recognized text. The later Semantic Layer can decide whether and how to use it.
+
+User voice intent may be incomplete, while handwritten or on-screen text is often the key source of page intent. OCR preservation is therefore a required v0.1 principle for visual-layer ground truth.
+
+Future evaluators should add text preservation and OCR similarity metrics in addition to geometry, type, interactivity, and shape metrics.
+
 ## Out Of Scope
 
 Manual visual annotations must not label business semantics:
