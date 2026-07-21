@@ -197,6 +197,11 @@ def main() -> int:
             json.dumps(final_state["vision_elements"], ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
+    if final_state.get("vision_elements_v0_1"):
+        (output_dir / "vision_elements_v0_1.json").write_text(
+            json.dumps(final_state["vision_elements_v0_1"], ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
     if final_state.get("ui_state_json"):
         (output_dir / "ui_state.json").write_text(
             json.dumps(final_state["ui_state_json"], ensure_ascii=False, indent=2, default=str),
