@@ -59,4 +59,44 @@ class RelationEvidenceTests(unittest.TestCase):
         self.assertEqual(result['elements'][1]['parent_id'],'region')
         self.assertLessEqual(result['elements'][1]['spatial_info']['bbox'][3],result['elements'][0]['spatial_info']['bbox'][3])
         self.assertIn('relationships',seen[0]['messages'][0]['content'])
+    def test_partial_policy_retains_valid_edge_without_accepting_asr_alias(self):
+        state=self.state();state['elements'].append({'id':'next','type':'button','text':'Next'})
+        quote='The card contains Nxt.'
+        state['relationships'].append({'parent_id':'region','child_id':'next','evidence_quote':quote})
+        original=copy.deepcopy(state);intent=self.quote+' '+quote
+        with self.assertRaisesRegex(ValueError,'child label'):apply_relation_evidence(state,intent)
+        result=apply_relation_evidence(state,intent,isolate_source_errors=True)
+        self.assertEqual(result['elements'][1]['parent_id'],'region')
+        self.assertIsNone(result['elements'][2]['parent_id'])
+        meta=result['page_meta']['relation_evidence']
+        self.assertEqual(meta['accepted_count'],1);self.assertEqual(meta['unresolved_count'],1)
+        self.assertEqual(meta['unresolved_edges'][0]['reason'],'child_label_not_anchored')
+        self.assertEqual(state,original)
+    def test_fabricated_quote_is_unresolved_never_accepted(self):
+        state=self.state();result=apply_relation_evidence(state,'No such quote exists.',isolate_source_errors=True)
+        self.assertIsNone(result['elements'][1]['parent_id'])
+        self.assertEqual(result['page_meta']['relation_evidence']['accepted_count'],0)
+        self.assertEqual(result['page_meta']['relation_evidence']['unresolved_count'],1)
+    def test_partial_policy_never_masks_global_conflict_or_cycle(self):
+        state=self.state();state['relationships'].append({'parent_id':'region','child_id':'send','evidence_quote':'fabricated'})
+        with self.assertRaisesRegex(ValueError,'conflicting'):apply_relation_evidence(state,self.quote,isolate_source_errors=True)
+        state=self.state();state['elements'][1]['type']='card'
+        state['relationships'].append({'parent_id':'send','child_id':'region','evidence_quote':'fabricated'})
+        with self.assertRaisesRegex(ValueError,'cycle'):apply_relation_evidence(state,self.quote,isolate_source_errors=True)
+    def test_partial_policy_never_masks_invalid_identity(self):
+        state=self.state();state['relationships'][0]['child_id']='missing'
+        with self.assertRaisesRegex(ValueError,'endpoint'):apply_relation_evidence(state,self.quote,isolate_source_errors=True)
+    def test_partial_architect_mode_uses_same_prompt_and_reports_unresolved(self):
+        state=self.state();state['relationships'][0]['evidence_quote']='fabricated';seen=[]
+        def create(**kw):
+            seen.append(kw);return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(state)))])
+        client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        vision={'elements':[{'id':'region','type':'card','bbox':{'x_min':0,'y_min':.5,'x_max':1,'y_max':.7}},{'id':'send','type':'button','text':'Send','bbox':{'x_min':0,'y_min':.8,'x_max':.3,'y_max':.9}}]}
+        with patch.dict(os.environ,{'UI_STRUCTURE_MODE':'hierarchy_evidence_v1'}),patch.object(ui_architect,'_get_openai_client',return_value=client):
+            strict=ui_architect.generate_ui_state(self.quote,vision)
+        with patch.dict(os.environ,{'UI_STRUCTURE_MODE':'hierarchy_partial_evidence_v1'}),patch.object(ui_architect,'_get_openai_client',return_value=client):
+            partial=ui_architect.generate_ui_state(self.quote,vision)
+        self.assertIn('error',strict);self.assertNotIn('error',partial)
+        self.assertEqual(seen[0]['messages'],seen[1]['messages'])
+        self.assertEqual(partial['page_meta']['relation_evidence']['unresolved_count'],1)
 if __name__=='__main__':unittest.main()

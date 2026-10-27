@@ -69,6 +69,11 @@ def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exac
             (folder / 'final_code.html').write_text(code, encoding='utf-8')
         status, reason = artifact_status(code, traced.calls)
         summary.update(status=status, finish_reason=reason)
+        state_path = folder / 'ui_state.json'
+        if state_path.is_file():
+            relation_meta = json.loads(state_path.read_text(encoding='utf-8')).get('page_meta',{}).get('relation_evidence',{})
+            summary.update(unresolved_relation_count=relation_meta.get('unresolved_count',0),
+                           relation_validation_status=relation_meta.get('validation_status'))
     except Exception as exc:
         # Do not persist provider exception strings or headers.
         summary.update(status='failed', error_type=type(exc).__name__)
@@ -98,7 +103,7 @@ def main():
                         default=['baseline','native_controls_v1'],help='Use baseline alone for trace collection, not an optimization comparison')
     parser.add_argument('--fusion-modes', nargs='+', choices=['exact_id', 'source_alignment_v1'],
                         default=['exact_id'], help='Compare a fusion mechanism with identical coder prompts')
-    parser.add_argument('--structure-modes', nargs='+', choices=['baseline','hierarchy_v1','hierarchy_evidence_v1'], default=['baseline'])
+    parser.add_argument('--structure-modes', nargs='+', choices=['baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1'], default=['baseline'])
     args = parser.parse_args()
     if len(args.modes)!=len(set(args.modes)):
         parser.error('modes must be unique')

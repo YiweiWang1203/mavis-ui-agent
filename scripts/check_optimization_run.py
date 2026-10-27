@@ -40,7 +40,8 @@ def snapshot(state_dir):
                          'http_status':c.get('http_status')} for c in calls if c.get('status')=='failed']
             result['runs'].append({'folder':str(folder),'status':summary.get('status'),
                 'fusion_mode':summary.get('fusion_mode'),'call_count':summary.get('call_count'),
-                'call_failures':failures,'html_exists':(folder/'final_code.html').is_file()})
+                'call_failures':failures,'unresolved_relation_count':summary.get('unresolved_relation_count',0),
+                'relation_validation_status':summary.get('relation_validation_status'),'html_exists':(folder/'final_code.html').is_file()})
     for path in sorted(root.glob('*.zip')):
         result['archives'].append({'path':str(path),'bytes':path.stat().st_size,
             'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})

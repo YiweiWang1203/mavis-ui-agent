@@ -51,5 +51,13 @@ class OptimizationProbeTests(unittest.TestCase):
         with self.assertRaises(ValueError):snapshot(self.root)
 
 
+    def test_unresolved_relation_warning_is_visible_in_probe(self):
+        arm=self.result/'batch/case/partial';arm.mkdir(parents=True)
+        self.write(self.result/'batch/batch.json',{'status':'started','runs':[{'folder':str(arm)}]})
+        self.write(arm/'run_summary.json',{'status':'html_generated_pending_browser_validation','call_count':2,'unresolved_relation_count':2,'relation_validation_status':'partial_evidence_unresolved'})
+        item=snapshot(self.root)['runs'][0]
+        self.assertEqual(item['unresolved_relation_count'],2)
+        self.assertEqual(item['relation_validation_status'],'partial_evidence_unresolved')
+
 if __name__=='__main__':
     unittest.main()
