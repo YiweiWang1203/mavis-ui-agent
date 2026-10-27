@@ -75,8 +75,15 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
     # Reject the retired artifact-repair switch instead of silently altering HTML.
     if os.getenv("UI_INPUT_CONTRACT_MODE", "off").strip().lower() != "off":
         raise ValueError("HTML repair is retired; unset UI_INPUT_CONTRACT_MODE")
-    if os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower() != "baseline" and renderer_mode != "llm":
+    if os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower() != "baseline" and renderer_mode not in {"llm", "controlled_components_v1"}:
         raise ValueError("Generation contract comparison requires UI_RENDERER_MODE=llm")
+    if renderer_mode == "controlled_components_v1":
+        if os.getenv("UI_CODER_CONTRACT_MODE", "baseline") != "controlled_components_v1":
+            raise ValueError("Controlled renderer requires explicit matching contract mode")
+        from src.renderers.controlled_components import render_controlled_components
+        code = render_controlled_components(ui_state_json)
+        trace_html_contract(code, ui_state_json, renderer="controlled_components_v1")
+        return {"code": code, "file_path": save_html_asset(code), "renderer": "controlled_components_v1"}
     if renderer_mode in {"auto", "deterministic"}:
         from src.renderers import render_ui_state_html, supports_deterministic_rendering
 

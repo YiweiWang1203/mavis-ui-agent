@@ -48,8 +48,10 @@ def source_record():
 
 def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exact_id', structure_mode='baseline'):
     folder.mkdir(exist_ok=False)
-    summary = dict(provenance, mode=mode, fusion_mode=fusion_mode, structure_mode=structure_mode, condition='M2', model=model, status='started',
-                   behavior_evaluated=False, generation_kind='fresh_end_to_end',
+    controlled = mode == 'controlled_components_v1'
+    summary = dict(provenance, mode=mode, renderer='controlled_components_v1' if controlled else 'llm',
+                   coder_model_enabled=not controlled, expected_call_count=2 if controlled else 3, fusion_mode=fusion_mode, structure_mode=structure_mode, condition='M2', model=model, status='started',
+                   behavior_evaluated=False, generation_kind='fresh_from_frozen_multimodal_inputs',
                    output_html_repair=False, max_tokens_per_stage=8192,
                    timeout_seconds_per_stage=600, max_retries=0,
                    temperatures={'vision': 0, 'ui_architect': 0.3, 'coder': 0.2})
@@ -59,7 +61,7 @@ def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exac
     # Set for each arm, do not inherit an accidental local repair/renderer setting.
     os.environ.update(UI_CODER_CONTRACT_MODE=mode, UI_INPUT_CONTRACT_MODE='off',
                       UI_FUSION_MODE=fusion_mode, UI_STRUCTURE_MODE=structure_mode,
-                      UI_RENDERER_MODE='llm', LAYOUT_SOLVER_ENABLED='1',
+                      UI_RENDERER_MODE='controlled_components_v1' if controlled else 'llm', LAYOUT_SOLVER_ENABLED='1',
                       VISION_MODEL=model, CODER_MODEL=model, CODER_PROD_MODEL=model)
     try:
         code = execute(inputs, 'M2', traced, folder, model)
@@ -71,7 +73,8 @@ def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exac
         # Do not persist provider exception strings or headers.
         summary.update(status='failed', error_type=type(exc).__name__)
     finally:
-        summary.update(elapsed_seconds=time.monotonic() - start,
+        summary.update(coder_model_called=any(c.get("stage")=="coder" for c in traced.calls),
+                       elapsed_seconds=time.monotonic() - start,
                        call_count=len(traced.calls),
                        usage=[c.get('response', {}).get('usage') for c in traced.calls])
         for call in traced.calls:
@@ -91,7 +94,7 @@ def main():
     parser.add_argument('--model', default='Qwen/Qwen3-VL-8B-Instruct')
     parser.add_argument('--output-root', type=Path, default=Path('outputs/optimization_generation'))
     parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('--modes',nargs='+',choices=['baseline','native_controls_v1','placement_v1','typed_controls_v1'],
+    parser.add_argument('--modes',nargs='+',choices=['baseline','native_controls_v1','placement_v1','typed_controls_v1','controlled_components_v1'],
                         default=['baseline','native_controls_v1'],help='Use baseline alone for trace collection, not an optimization comparison')
     parser.add_argument('--fusion-modes', nargs='+', choices=['exact_id', 'source_alignment_v1'],
                         default=['exact_id'], help='Compare a fusion mechanism with identical coder prompts')
@@ -123,7 +126,7 @@ def main():
         hashes = {key: sha256(p) for key, p in copied['files'].items()}
         frozen.append((dest, copied, hashes))
     manifest = dict(provenance, status='dry_run_only' if args.dry_run else 'started',
-                    model=args.model, call_limit=3 * len(args.modes) * len(args.fusion_modes) * len(args.structure_modes) * len(frozen), modes=args.modes,
+                    model=args.model, call_limit=sum(2 if m=='controlled_components_v1' else 3 for m in args.modes) * len(args.fusion_modes) * len(args.structure_modes) * len(frozen), modes=args.modes,
                     fusion_modes=args.fusion_modes, structure_modes=args.structure_modes,
                     cases=[{'source_case': str(p.resolve()), 'folder': str(d), 'input_sha256': h}
                            for p, (d, _, h) in zip(args.cases, frozen)], runs=[])
