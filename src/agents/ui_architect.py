@@ -297,8 +297,12 @@ def finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, pr
             if structure_mode == 'hierarchy_node_evidence_v1':
                 from src.utils.node_relation_evidence import compile_node_relations
                 ui_state = compile_node_relations(ui_state)
-            ui_state = apply_relation_evidence(ui_state, user_intent,
-                isolate_source_errors=structure_mode in {"hierarchy_partial_evidence_v1", "hierarchy_registry_v1", "hierarchy_registry_inline_v1", "hierarchy_registry_image_v1", "hierarchy_node_evidence_v1"})
+            if os.getenv('UI_RELATION_AGGREGATION_MODE','off') == 'validated_union_v1':
+                from src.utils.relation_aggregation import aggregate_relation_sources
+                ui_state = aggregate_relation_sources(ui_state,user_intent)
+            else:
+                ui_state = apply_relation_evidence(ui_state, user_intent,
+                    isolate_source_errors=structure_mode in {"hierarchy_partial_evidence_v1", "hierarchy_registry_v1", "hierarchy_registry_inline_v1", "hierarchy_registry_image_v1", "hierarchy_node_evidence_v1"})
         return solve_hierarchy(build_structure(ui_state, vision_elements))
     repaired = repair_ui_state_with_vision(
         ui_state,

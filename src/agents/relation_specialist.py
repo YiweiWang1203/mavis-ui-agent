@@ -40,6 +40,9 @@ def refine_relation_state(state, user_intent, model, client, mode='source_ledger
             raise ValueError('Specialist may only output a relationship ledger')
         relationships = declarations['relationships']
     result = copy.deepcopy(state)
+    result['relation_evidence_sources'] = [
+        {'source': 'architect', 'relationships': copy.deepcopy(state.get('relationships'))},
+        {'source': 'specialist', 'relationships': copy.deepcopy(relationships)}]
     result['relationships'] = relationships
     result.setdefault('page_meta', {})['relation_specialist'] = {
         'version': mode, 'additional_calls': 1,

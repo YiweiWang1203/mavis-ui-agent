@@ -70,7 +70,7 @@ def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exac
     start = time.monotonic()
     # Set for each arm, do not inherit an accidental local repair/renderer setting.
     os.environ.update(UI_CODER_CONTRACT_MODE=mode, UI_INPUT_CONTRACT_MODE='off',
-                      UI_FUSION_MODE=fusion_mode, UI_STRUCTURE_MODE=structure_mode, UI_RELATION_SPECIALIST_MODE='off', UI_HIERARCHY_LAYOUT_MODE='baseline',
+                      UI_FUSION_MODE=fusion_mode, UI_STRUCTURE_MODE=structure_mode, UI_RELATION_SPECIALIST_MODE='off', UI_RELATION_AGGREGATION_MODE='off', UI_HIERARCHY_LAYOUT_MODE='baseline',
                       UI_RENDERER_MODE='controlled_components_v1' if controlled else 'llm', LAYOUT_SOLVER_ENABLED='1',
                       VISION_MODEL=model, CODER_MODEL=model, CODER_PROD_MODEL=model)
     try:
