@@ -24,6 +24,7 @@ def _get_openai_client():
     return OpenAI(
         api_key=os.getenv("SILICONFLOW_API_KEY") or os.getenv("OPENAI_API_KEY"),
         base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
+        max_retries=0, timeout=600,
     )
 
 
@@ -269,27 +270,10 @@ Return the final fused UI-State JSON.
         raw_json_str = response.choices[0].message.content
         ui_state = json.loads(raw_json_str)
         trace_event('architect.model_parsed',output=ui_state)
-        if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
-            from src.utils.hierarchy_contract import build_structure, solve_hierarchy
-            if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
-                from src.utils.relation_evidence import apply_relation_evidence
-                if structure_mode in {'hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
-                    from src.utils.container_registry import compile_container_registry
-                    ui_state = compile_container_registry(ui_state, vision_elements, user_intent,
-                        inline=structure_mode in {'hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'})
-                if structure_mode == 'hierarchy_node_evidence_v1':
-                    from src.utils.node_relation_evidence import compile_node_relations
-                    ui_state = compile_node_relations(ui_state)
-                ui_state = apply_relation_evidence(ui_state, user_intent,
-                    isolate_source_errors=structure_mode in {"hierarchy_partial_evidence_v1", "hierarchy_registry_v1", "hierarchy_registry_inline_v1", "hierarchy_registry_image_v1", "hierarchy_node_evidence_v1"})
-            return solve_hierarchy(build_structure(ui_state, vision_elements))
-        repaired = repair_ui_state_with_vision(
-            ui_state,
-            vision_elements,
-            preferred_locale or infer_locale_from_text(user_intent),
-        )
-        priorized = apply_ui_priors(repaired, user_intent=user_intent, vision_elements=vision_elements)
-        return solve_ui_layout(priorized)
+        if os.getenv('UI_RELATION_SPECIALIST_MODE', 'off') == 'source_ledger_v1':
+            from src.agents.relation_specialist import refine_relation_state
+            ui_state = refine_relation_state(ui_state, user_intent, planner_model, _get_openai_client())
+        return finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, preferred_locale)
 
     except json.JSONDecodeError as exc:
         print(f"UI Architect JSON parse failed: {exc}")
@@ -297,6 +281,31 @@ Return the final fused UI-State JSON.
     except Exception as exc:
         print(f"UI Architect failed: {exc}")
         return {"error": str(exc)}
+
+
+@traced_stage('architect.finalize')
+def finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, preferred_locale=None):
+    if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
+        from src.utils.hierarchy_contract import build_structure, solve_hierarchy
+        if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
+            from src.utils.relation_evidence import apply_relation_evidence
+            if structure_mode in {'hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
+                from src.utils.container_registry import compile_container_registry
+                ui_state = compile_container_registry(ui_state, vision_elements, user_intent,
+                    inline=structure_mode in {'hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'})
+            if structure_mode == 'hierarchy_node_evidence_v1':
+                from src.utils.node_relation_evidence import compile_node_relations
+                ui_state = compile_node_relations(ui_state)
+            ui_state = apply_relation_evidence(ui_state, user_intent,
+                isolate_source_errors=structure_mode in {"hierarchy_partial_evidence_v1", "hierarchy_registry_v1", "hierarchy_registry_inline_v1", "hierarchy_registry_image_v1", "hierarchy_node_evidence_v1"})
+        return solve_hierarchy(build_structure(ui_state, vision_elements))
+    repaired = repair_ui_state_with_vision(
+        ui_state,
+        vision_elements,
+        preferred_locale or infer_locale_from_text(user_intent),
+    )
+    priorized = apply_ui_priors(repaired, user_intent=user_intent, vision_elements=vision_elements)
+    return solve_ui_layout(priorized)
 
 
 if __name__ == "__main__":
