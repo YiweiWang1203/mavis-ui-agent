@@ -19,8 +19,8 @@ const sha=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'
   page.on('dialog',async d=>{dialogs.push(d.message());await d.dismiss();});
   await page.goto(pathToFileURL(path.resolve(html)).href,{waitUntil:'networkidle',timeout:30000});
   const elements=await page.evaluate(els=>els.map(e=>{
-   const nodes=[...document.querySelectorAll('[id]')].filter(n=>n.id===e.id),n=nodes[0],r=n?.getBoundingClientRect();
-   return {id:e.id,text:e.text,type:e.type,parent_id:e.parent_id,count:nodes.length,tag:n?.tagName,dom_parent:n?.getAttribute('data-parent-id'),rect:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null};
+   const nodes=[...document.querySelectorAll('[id]')].filter(n=>n.id===e.id),n=nodes[0],r=n?.getBoundingClientRect(),css=n?getComputedStyle(n):null;
+   return {id:e.id,text:e.text,type:e.type,parent_id:e.parent_id,count:nodes.length,tag:n?.tagName,dom_parent:n?.getAttribute('data-parent-id'),actual_parent:n?.parentElement?.id,appearance:css?{background:css.backgroundColor,border:css.borderTopWidth,border_style:css.borderTopStyle,color:css.color}:null,rect:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null};
   }),state.elements);
   const relations=[];
   for(const label of ['现在','预约','菜单','主界面','返回']){
@@ -37,7 +37,7 @@ const sha=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'
   const clicks=[];
   for(const label of ['现在','预约','菜单','主界面','返回']){
    const e=elements.find(e=>e.text===label);if(!e)continue;
-   const start=dialogs.length;try{await page.locator('[id="'+e.id+'"]').click({timeout:1500});clicks.push({label,clicked:true,dialogs:dialogs.slice(start)});}catch(error){clicks.push({label,clicked:false,error:error.message.split('\n')[0]});}
+   const start=dialogs.length;try{await page.locator('[id="'+e.id+'"]').click({timeout:1500});clicks.push({label,clicked:true,dialogs:dialogs.slice(start),related_dialog:dialogs.slice(start).some(d=>d.includes(label))});}catch(error){clicks.push({label,clicked:false,error:error.message.split('\n')[0]});}
   }
   await page.evaluate(()=>window.scrollTo(0,0));
   await page.screenshot({path:path.join(out,arm+'.png')});

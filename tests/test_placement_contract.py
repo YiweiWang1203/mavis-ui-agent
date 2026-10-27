@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
-from src.utils.placement_contract import compile_placement_contract
+from src.utils.placement_contract import compile_placement_contract, compile_component_contract
 from src.agents import coder
 
 class PlacementTests(unittest.TestCase):
@@ -36,5 +36,32 @@ class PlacementTests(unittest.TestCase):
         prompt=seen[0]['messages'][0]['content']
         self.assertIn('COMPILED PLACEMENT CONTRACT',prompt)
         self.assertIn('top:568px;',prompt)
+        self.assertEqual(result['code'],raw)
+    def test_native_roles_do_not_make_passive_regions_interactive(self):
+        state=self.state()
+        state['elements'] += [
+            {'id':'q','type':'search_bar','readonly':False,'spatial_info':{'bbox':[20,20,120,60]}},
+            {'id':'photo','type':'image','spatial_info':{'bbox':[0,100,200,300]}},
+            {'id':'secret','type':'password_input','readonly':True,'spatial_info':{'bbox':[0,60,200,100]}}]
+        original=copy.deepcopy(state)
+        specs={s['id']:s for s in compile_component_contract(state)}
+        self.assertEqual(specs['q']['tag'],'input')
+        self.assertEqual(specs['q']['input_type'],'search')
+        self.assertFalse(specs['q']['disabled'])
+        self.assertEqual(specs['child']['tag'],'button')
+        self.assertIn('acknowledgement',specs['child']['feedback'])
+        self.assertEqual(specs['photo']['feedback'],'none')
+        self.assertTrue(specs['secret']['readonly'])
+        self.assertEqual(state,original)
+    def test_real_coder_adds_component_contract_without_repair(self):
+        seen=[];raw='<html><div id="q"></div></html>'
+        def create(**kw):
+            seen.append(kw)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=raw))])
+        client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        with patch.dict(os.environ,{'UI_RENDERER_MODE':'llm','UI_CODER_CONTRACT_MODE':'typed_controls_v1','UI_INPUT_CONTRACT_MODE':'off'}),patch.object(coder,'_get_openai_client',return_value=client),patch.object(coder,'save_html_asset',return_value=None):
+            result=coder.generate_frontend_code(self.state())
+        self.assertIn('COMPILED PLACEMENT CONTRACT',seen[0]['messages'][0]['content'])
+        self.assertIn('COMPILED COMPONENT CONTRACT',seen[0]['messages'][0]['content'])
         self.assertEqual(result['code'],raw)
 if __name__=='__main__':unittest.main()

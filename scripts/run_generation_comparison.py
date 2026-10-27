@@ -91,7 +91,7 @@ def main():
     parser.add_argument('--model', default='Qwen/Qwen3-VL-8B-Instruct')
     parser.add_argument('--output-root', type=Path, default=Path('outputs/optimization_generation'))
     parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('--modes',nargs='+',choices=['baseline','native_controls_v1','placement_v1'],
+    parser.add_argument('--modes',nargs='+',choices=['baseline','native_controls_v1','placement_v1','typed_controls_v1'],
                         default=['baseline','native_controls_v1'],help='Use baseline alone for trace collection, not an optimization comparison')
     parser.add_argument('--fusion-modes', nargs='+', choices=['exact_id', 'source_alignment_v1'],
                         default=['exact_id'], help='Compare a fusion mechanism with identical coder prompts')

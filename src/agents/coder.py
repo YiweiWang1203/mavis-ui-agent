@@ -36,10 +36,10 @@ def read_coder_prompt():
     except FileNotFoundError:
         prompt = "Generate a complete runnable HTML file from the provided UI-State JSON."
     mode = os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower()
-    if mode in {"baseline", "placement_v1"}:
+    if mode in {"baseline", "placement_v1", "typed_controls_v1"}:
         return prompt
     if mode != "native_controls_v1":
-        raise ValueError("UI_CODER_CONTRACT_MODE must be baseline, native_controls_v1 or placement_v1")
+        raise ValueError("UI_CODER_CONTRACT_MODE must be baseline, native_controls_v1, placement_v1 or typed_controls_v1")
     contract_path = prompt_path.with_name("coder_native_controls.md")
     return prompt + "\n\n" + contract_path.read_text(encoding="utf-8")
 
@@ -91,9 +91,12 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
     system_prompt = read_coder_prompt()
     if (ui_state_json.get('page_meta',{}).get('layout_solver') or {}).get('version') == 'hierarchy-v1':
         system_prompt += "\nHierarchy contract overrides conflicting placement advice: preserve each id once, exact bbox size and page-global position; do not expand or globally repack controls. Render all elements absolutely under one positioned page root, and attach data-parent-id for non-root elements. Parent backgrounds are permitted behind children. Do not render children a second time through children_ids. Use border-box, zero root/body margins. Render visible region boundaries for drawn containers and image placeholders.\n"
-    if os.getenv("UI_CODER_CONTRACT_MODE", "baseline") == "placement_v1":
+    if os.getenv("UI_CODER_CONTRACT_MODE", "baseline") in {"placement_v1", "typed_controls_v1"}:
         from src.utils.placement_contract import placement_instructions
         system_prompt += placement_instructions(ui_state_json)
+    if os.getenv("UI_CODER_CONTRACT_MODE", "baseline") == "typed_controls_v1":
+        from src.utils.placement_contract import component_instructions
+        system_prompt += component_instructions(ui_state_json)
     user_content = (
         "Generate runnable frontend code from the following UI-State JSON.\n\n"
         f"{json.dumps(ui_state_json, ensure_ascii=False, indent=2)}"

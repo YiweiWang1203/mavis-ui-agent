@@ -34,3 +34,44 @@ def placement_instructions(state):
             "Do not depend on CDN CSS for the coordinate reset. Render container backgrounds before their children. "
             "Keep original types and actions; this contract changes coordinate implementation only.\n"+
             json.dumps(manifest,ensure_ascii=False))
+
+
+INPUT_TYPES={'input':'text','text_input':'text','search_input':'search','search_bar':'search','password_input':'password','email_input':'email','number_input':'number'}
+REGION_TYPES={'container','card','navigation','navigation_bar','nav_bar','toolbar','header','footer','image','avatar','modal'}
+
+def compile_component_contract(state):
+    # Geometry remains owned by the placement compiler. No content-based case rules.
+    compile_placement_contract(state)
+    rows=[]
+    for e in state['elements']:
+        kind=e.get('type','');label=e.get('text') or e.get('label') or ''
+        row={'id':e['id'],'source_type':kind,'label':label,'tag':'div','feedback':'none'}
+        if kind in INPUT_TYPES or kind=='textarea':
+            row.update(tag='textarea' if kind=='textarea' else 'input',input_type=INPUT_TYPES.get(kind),
+                       disabled=e.get('disabled') is True,readonly=e.get('readonly') is True,
+                       placeholder=e.get('placeholder') or '',affordance='visible border and focus outline')
+        elif kind=='button' or (e.get('rpa_action') and kind not in {'text','image','avatar'}):
+            row.update(tag='button',button_type='button',action=e.get('rpa_action'),
+                       feedback='labelled click acknowledgement only; no invented business success',
+                       affordance='visible border, contrasting label, pointer and focus outline')
+        elif kind in REGION_TYPES:
+            row.update(affordance='visible subtle border/background, no invented image content')
+        elif kind=='divider':
+            row.update(affordance='visible separator')
+        rows.append(row)
+    return rows
+
+def component_instructions(state):
+    return ("\nCOMPILED COMPONENT CONTRACT. Copy the tag and behavior for each id below. "
+            "A search_bar is an editable input, NEVER an empty div. Put its id on the operative native control. "
+            "Preserve placement manifest style exactly, adding visible borders/backgrounds with border-box. "
+            "Keep input native focus/typing; do not attach click alerts to inputs or clear their values. "
+            "For button tags, bind an actual click handler. If an explicit action exists preserve it; "
+            "otherwise button type itself supports a minimal labelled click acknowledgement. "
+            "Show an alert with the corresponding existing button label (e.g. Clicked: + label, localized to page locale), "
+            "without claiming a backend operation succeeded. Do not leave handler as console.log only. "
+            "No new pages, backend, elements or business behavior. Passive regions stay passive. "
+            "Render every drawn passive region with a visible boundary or subtle background, not blank whitespace. "
+            "Do not change bbox to accommodate padding; inline sizes are border-box. "
+            "Return complete raw HTML with working handlers, not a report.\n"+
+            json.dumps(compile_component_contract(state),ensure_ascii=False))
