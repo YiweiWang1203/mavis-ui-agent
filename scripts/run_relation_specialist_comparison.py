@@ -54,6 +54,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case', required=True, type=Path)
     parser.add_argument('--output-root', required=True, type=Path)
+    parser.add_argument('--specialist-mode', choices=['source_ledger_v1', 'container_slots_v1'], default='source_ledger_v1')
     args = parser.parse_args()
     inputs = load_inputs(args.case.resolve(), 'M2')
     provenance = source_record()
@@ -85,7 +86,7 @@ def main():
     from openai import OpenAI
     gate = CappedProvider(OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600))
     client = BudgetClient(gate, shared)
-    manifest = dict(provenance, status='started', call_limit=3, shared_calls=2,
+    manifest = dict(provenance, status='started', specialist_mode=args.specialist_mode, call_limit=3, shared_calls=2,
         effective_calls={'baseline': 2, 'relation_specialist': 3},
         budget_note='shared new vision+architect; candidate adds one evidence call; not equal-call arms',
         input_sha256=hashes, runs=[])
@@ -122,7 +123,7 @@ def main():
         from src.renderers.controlled_components import render_controlled_components
         intent = inputs['prompt'] + '\n\n[Spoken transcript]\n' + inputs['transcript']
         with PipelineTrace(candidate_folder / 'pipeline_trace', {'entrypoint': 'fresh_shared_upstream_relation_split', 'preprocessing': 'not_executed_frozen_assets'}):
-            proposal = refine_relation_state(copy.deepcopy(raw), intent, model, candidate_client)
+            proposal = refine_relation_state(copy.deepcopy(raw), intent, model, candidate_client, mode=args.specialist_mode)
             if proposal['elements'] != raw['elements']:
                 raise RuntimeError('Specialist changed source nodes')
             write_json(candidate_folder / 'specialist_proposal.json', proposal)

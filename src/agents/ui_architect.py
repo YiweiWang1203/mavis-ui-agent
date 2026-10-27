@@ -270,9 +270,10 @@ Return the final fused UI-State JSON.
         raw_json_str = response.choices[0].message.content
         ui_state = json.loads(raw_json_str)
         trace_event('architect.model_parsed',output=ui_state)
-        if os.getenv('UI_RELATION_SPECIALIST_MODE', 'off') == 'source_ledger_v1':
+        specialist_mode = os.getenv('UI_RELATION_SPECIALIST_MODE', 'off')
+        if specialist_mode in {'source_ledger_v1', 'container_slots_v1'}:
             from src.agents.relation_specialist import refine_relation_state
-            ui_state = refine_relation_state(ui_state, user_intent, planner_model, _get_openai_client())
+            ui_state = refine_relation_state(ui_state, user_intent, planner_model, _get_openai_client(), mode=specialist_mode)
         return finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, preferred_locale)
 
     except json.JSONDecodeError as exc:
