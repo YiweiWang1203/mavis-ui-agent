@@ -23,6 +23,16 @@ class BudgetClient(TracedClient):
         return super().create(**kwargs)
 
 
+def request_image(call):
+    for message in call.get('request', {}).get('messages', []):
+        content = message.get('content')
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get('type') == 'image_url':
+                    return part.get('image_url', {}).get('url')
+    return None
+
+
 def artifact_status(code, calls):
     choices = calls[-1].get('response', {}).get('choices', []) if calls else []
     reason = choices[0].get('finish_reason') if choices else None
@@ -78,6 +88,10 @@ def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exac
         # Do not persist provider exception strings or headers.
         summary.update(status='failed', error_type=type(exc).__name__)
     finally:
+        vision_image = next((request_image(c) for c in traced.calls if c.get('stage') == 'vision'), None)
+        architect_image = next((request_image(c) for c in traced.calls if c.get('stage') == 'ui_architect'), None)
+        summary.update(architect_image_attached=bool(architect_image),
+                       architect_vision_image_match=(architect_image == vision_image) if architect_image else None)
         summary.update(coder_model_called=any(c.get("stage")=="coder" for c in traced.calls),
                        elapsed_seconds=time.monotonic() - start,
                        call_count=len(traced.calls),
@@ -103,7 +117,7 @@ def main():
                         default=['baseline','native_controls_v1'],help='Use baseline alone for trace collection, not an optimization comparison')
     parser.add_argument('--fusion-modes', nargs='+', choices=['exact_id', 'source_alignment_v1'],
                         default=['exact_id'], help='Compare a fusion mechanism with identical coder prompts')
-    parser.add_argument('--structure-modes', nargs='+', choices=['baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1'], default=['baseline'])
+    parser.add_argument('--structure-modes', nargs='+', choices=['baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1'], default=['baseline'])
     args = parser.parse_args()
     if len(args.modes)!=len(set(args.modes)):
         parser.error('modes must be unique')

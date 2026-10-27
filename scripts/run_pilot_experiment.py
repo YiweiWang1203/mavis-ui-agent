@@ -155,7 +155,10 @@ def _execute(inputs, condition, traced, output, model):
                 raise ValueError("vision_validation_failed")
         # M0 deliberately supplies None: native architect accepts absent geometry.
         traced.stage = "ui_architect"
-        ui_state = ui_architect.generate_ui_state(intent, vision)
+        if os.getenv('UI_STRUCTURE_MODE') == 'hierarchy_registry_image_v1':
+            ui_state = ui_architect.generate_ui_state(intent, vision, image_data_url=image_url)
+        else:
+            ui_state = ui_architect.generate_ui_state(intent, vision)
         write_json(output / "ui_state.json", ui_state)
         if not ui_state or ui_state.get("error"):
             raise ValueError("ui_architect_failed")
