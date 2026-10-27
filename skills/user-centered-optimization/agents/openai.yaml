@@ -1,0 +1,6 @@
+interface:
+  display_name: "用户任务驱动的六步优化"
+  short_description: "从用户失败到原因定位、目标设定、实现验证与回归决策的六步优化流程"
+  default_prompt: "使用 $user-centered-optimization，依据实际用户失败启动一轮可追溯、可验证的系统优化。"
+policy:
+  allow_implicit_invocation: true

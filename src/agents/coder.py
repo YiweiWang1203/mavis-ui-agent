@@ -31,9 +31,16 @@ def read_coder_prompt():
     """Read the Coder system prompt."""
     prompt_path = Path(__file__).resolve().parent.parent / "prompts" / "coder.md"
     try:
-        return prompt_path.read_text(encoding="utf-8")
+        prompt = prompt_path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return "Generate a complete runnable HTML file from the provided UI-State JSON."
+        prompt = "Generate a complete runnable HTML file from the provided UI-State JSON."
+    mode = os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower()
+    if mode == "baseline":
+        return prompt
+    if mode != "native_controls_v1":
+        raise ValueError("UI_CODER_CONTRACT_MODE must be baseline or native_controls_v1")
+    contract_path = prompt_path.with_name("coder_native_controls.md")
+    return prompt + "\n\n" + contract_path.read_text(encoding="utf-8")
 
 
 def strip_markdown_code_fence(code: str) -> str:
@@ -63,6 +70,11 @@ def save_html_asset(code: str) -> str | None:
 def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str:
     """Generate runnable frontend HTML from a UI-State JSON contract."""
     renderer_mode = os.getenv("UI_RENDERER_MODE", "auto").strip().lower()
+    # Reject the retired artifact-repair switch instead of silently altering HTML.
+    if os.getenv("UI_INPUT_CONTRACT_MODE", "off").strip().lower() != "off":
+        raise ValueError("HTML repair is retired; unset UI_INPUT_CONTRACT_MODE")
+    if os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower() != "baseline" and renderer_mode != "llm":
+        raise ValueError("Generation contract comparison requires UI_RENDERER_MODE=llm")
     if renderer_mode in {"auto", "deterministic"}:
         from src.renderers import render_ui_state_html, supports_deterministic_rendering
 
