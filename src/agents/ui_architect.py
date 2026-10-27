@@ -5,6 +5,7 @@ from typing import Any
 
 from src.priors import apply_ui_priors
 from src.utils.layout_solver import solve_ui_layout
+from src.utils.pipeline_trace import traced_stage, trace_event
 
 try:
     from dotenv import load_dotenv
@@ -116,6 +117,7 @@ def _fallback_element_from_vision(element: dict[str, Any], viewport: dict[str, i
     }
 
 
+@traced_stage('architect.geometry_merge')
 def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred_locale: str | None = None) -> dict:
     """Use validated vision bboxes as the authoritative UI-State geometry.
 
@@ -146,9 +148,11 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
         model_elements = []
 
     used_ids: set[str] = set()
+    decisions = []
     repaired_elements: list[dict[str, Any]] = []
     for index, model_element in enumerate(model_elements, start=1):
         if not isinstance(model_element, dict):
+            decisions.append({'index':index,'decision':'drop','reason':'model_element_not_object'})
             continue
         element = copy.deepcopy(model_element)
         element_id = element.get("id") or f"e{index}"
@@ -170,21 +174,28 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
                 if clamped:
                     spatial_info["bbox"] = clamped
                 else:
+                    decisions.append({'id':element_id,'decision':'drop','reason':'unmatched_id_invalid_bbox'})
                     continue
             else:
+                decisions.append({'id':element_id,'decision':'drop','reason':'unmatched_id_missing_spatial_info'})
                 continue
 
         element.setdefault("rpa_action", "")
         repaired_elements.append(element)
+        decisions.append({'id':element_id,'decision':'keep','reason':'matched_vision_id_geometry' if vision_element else 'unmatched_model_id_clamped_geometry'})
 
     for vision_id, vision_element in vision_by_id.items():
         if vision_id not in used_ids:
             repaired_elements.append(_fallback_element_from_vision(vision_element, viewport))
+            decisions.append({'id':vision_id,'decision':'append_vision_fallback','reason':'vision_id_not_used_by_model'})
 
     repaired["elements"] = repaired_elements
+    trace_event('architect.geometry_merge.decisions',decisions=decisions,
+                matching_policy='exact_id_only_no_semantic_matching')
     return repaired
 
 
+@traced_stage('architect.generate')
 def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None) -> dict:
     """Fuse user intent and validated vision data into a UI-State JSON contract."""
     system_prompt = read_ui_architect_prompt()
@@ -217,6 +228,7 @@ Return the final fused UI-State JSON.
 
         raw_json_str = response.choices[0].message.content
         ui_state = json.loads(raw_json_str)
+        trace_event('architect.model_parsed',output=ui_state)
         repaired = repair_ui_state_with_vision(
             ui_state,
             vision_elements,

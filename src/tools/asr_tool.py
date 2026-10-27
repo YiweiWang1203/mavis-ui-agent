@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from langchain_core.tools import tool
+from src.utils.pipeline_trace import traced_stage, trace_event
 
 
 if os.name != "nt":
@@ -136,6 +137,7 @@ def _clear_model_after_error() -> None:
 
 
 @tool
+@traced_stage('preprocess.asr_tool')
 def asr_tool(audio_path: str) -> str:
     """Transcribe audio with FunASR and save both JSON and text transcripts."""
     global model
@@ -173,6 +175,8 @@ def asr_tool(audio_path: str) -> str:
             result = model.generate(input=wav_path, batch_size=1, is_final=True, sentence_timestamp=True)
 
         rec_result = result[0]
+        trace_event('preprocess.asr_model_output',output=rec_result,
+                    model_paths=[asr_path,vad_path,punc_path,spk_path])
         full_transcript, structured = _parse_funasr_result(rec_result)
 
         base_name = Path(audio_path).stem

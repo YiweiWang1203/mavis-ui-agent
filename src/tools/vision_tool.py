@@ -12,6 +12,7 @@ from src.schemas.vision_schema import VisionLayoutPayload, VisionLayoutResult, V
 from src.prompts.template import get_prompt_template
 from langchain_core.prompts import PromptTemplate
 from openai import OpenAI
+from src.utils.pipeline_trace import traced_stage, trace_event
 
 load_dotenv()
 
@@ -227,6 +228,7 @@ def _build_reading_order(provided_ro: Optional[List[str]], ids: List[str]) -> Tu
         return list(ids), False
 
 
+@traced_stage('vision.extract')
 def extract_ui_layout(image_path: str,
                       user_context: Optional[str] = None,
                       previous_layout: Optional[dict] = None,
@@ -310,6 +312,7 @@ def extract_ui_layout(image_path: str,
     canvas = {'width': width, 'height': height, 'orientation': 'portrait' if height>width else ('landscape' if width>height else 'square')}
 
     raw_elements = model_out.get('elements') or model_out.get('items') or []
+    trace_event('vision.model_parsed',output=model_out)
     normalized_elements = []
     errors = []
     for i, relem in enumerate(raw_elements):
@@ -320,6 +323,7 @@ def extract_ui_layout(image_path: str,
             errors.append(err or 'normalize_failed')
 
     # ensure stable ids and reading order
+    trace_event('vision.normalized_before_ids',output={'elements':normalized_elements},errors=errors)
     elems_sorted, ids = _stable_sort_and_id(normalized_elements)
     ro_provided = model_out.get('reading_order') if isinstance(model_out.get('reading_order'), list) else None
     reading_order, repaired = _build_reading_order(ro_provided, ids)
@@ -343,6 +347,7 @@ def extract_ui_layout(image_path: str,
     return {'payload': payload, 'diagnostics': diagnostics}
 
 
+@traced_stage('vision.validate')
 def validate_vision_layout(layout_dict: dict, image_path: Optional[str] = None) -> Tuple[dict, VisionValidation]:
     errors: List[str] = []
     warnings: List[str] = []

@@ -99,6 +99,21 @@ class TracedClient:
 
 
 def execute(inputs, condition, traced, output, model):
+    from src.utils.pipeline_trace import PipelineTrace
+    with PipelineTrace(output / 'pipeline_trace', {
+        'entrypoint':'run_pilot_experiment.execute','condition':condition,
+        'preprocessing':'not_executed_reusing_case_assets',
+        'transcript_source':inputs.get('transcript_source'),
+    }) as trace:
+        trace.record('case.inputs', inputs={k:v for k,v in inputs.items() if k!='files'},
+                     input_files={key:{'path':str(path),'sha256':sha256(path)} for key,path in inputs['files'].items()})
+        result = _execute(inputs, condition, traced, output, model)
+        trace.record('pipeline.return', html=result,
+                     contains_html=bool(result and '<html' in result.lower()))
+        return result
+
+
+def _execute(inputs, condition, traced, output, model):
     from src.agents import coder, ui_architect
     # Load the existing vision module without initializing unrelated tools/agents.
     spec = importlib.util.spec_from_file_location("pilot_native_vision", ROOT / "src/tools/vision_tool.py")

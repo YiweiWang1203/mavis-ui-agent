@@ -77,7 +77,7 @@ def run_one(inputs, mode, folder, model, provider, provenance):
             if call.get('stage') == 'coder' and call.get('response', {}).get('choices'):
                 raw = call['response']['choices'][0]['message'].get('content') or ''
                 (folder / 'coder_response.txt').write_text(raw, encoding='utf-8')
-        summary['artifact_sha256'] = {p.name: sha256(p) for p in folder.iterdir()
+        summary['artifact_sha256'] = {p.relative_to(folder).as_posix(): sha256(p) for p in folder.rglob('*')
                                      if p.is_file() and p.name != 'run_summary.json'}
         write_json(folder / 'run_summary.json', summary)
         print(f"{mode}: {summary['status']}: {folder}", flush=True)
@@ -90,7 +90,11 @@ def main():
     parser.add_argument('--model', default='Qwen/Qwen3-VL-8B-Instruct')
     parser.add_argument('--output-root', type=Path, default=Path('outputs/optimization_generation'))
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--modes',nargs='+',choices=['baseline','native_controls_v1'],
+                        default=['baseline','native_controls_v1'],help='Use baseline alone for trace collection, not an optimization comparison')
     args = parser.parse_args()
+    if len(args.modes)!=len(set(args.modes)):
+        parser.error('modes must be unique')
     # Validate every case before creating runs or making calls.
     loaded = [load_inputs(p.resolve(), 'M2') for p in args.cases]
     provenance = source_record()
@@ -111,7 +115,7 @@ def main():
         hashes = {key: sha256(p) for key, p in copied['files'].items()}
         frozen.append((dest, copied, hashes))
     manifest = dict(provenance, status='dry_run_only' if args.dry_run else 'started',
-                    model=args.model, call_limit=6 * len(frozen),
+                    model=args.model, call_limit=3 * len(args.modes) * len(frozen), modes=args.modes,
                     cases=[{'source_case': str(p.resolve()), 'folder': str(d), 'input_sha256': h}
                            for p, (d, _, h) in zip(args.cases, frozen)], runs=[])
     write_json(batch / 'batch.json', manifest)
@@ -137,7 +141,7 @@ def main():
     provider = OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600)
     failed = False
     for index, (dest, inputs, hashes) in enumerate(frozen):
-        order = ['baseline', 'native_controls_v1'] if index % 2 == 0 else ['native_controls_v1', 'baseline']
+        order = list(args.modes) if index % 2 == 0 else list(reversed(args.modes))
         for mode in order:
             if hashes != {k: sha256(p) for k, p in inputs['files'].items()} or source_record() != provenance:
                 raise RuntimeError('Inputs or code changed during batch; stopped')

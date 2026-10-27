@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from src.utils.pipeline_trace import traced_stage
 
 DEFAULT_USER_TEXT = "Generate runnable frontend UI code from the provided attachments."
 DEFAULT_TEAM_MEMBERS = [
@@ -312,6 +313,7 @@ def build_multimodal_prompt(
     return "\n".join(lines)
 
 
+@traced_stage('workflow.prepare_input')
 def prepare_workflow_input(
     *,
     text: str | None = None,

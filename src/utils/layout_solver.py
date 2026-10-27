@@ -2,6 +2,7 @@ import copy
 import math
 import os
 from typing import Any
+from src.utils.pipeline_trace import traced_stage
 
 
 INTERACTIVE_TYPES = {"button", "input", "select", "search_input", "switch", "tab"}
@@ -260,6 +261,7 @@ def _solve_product_detail_layout(
     return result
 
 
+@traced_stage('architect.layout')
 def solve_ui_layout(ui_state: dict[str, Any]) -> dict[str, Any]:
     """Convert tight visual evidence boxes into a bounded relational render layout.
 

@@ -3,11 +3,13 @@ from pathlib import Path
 from typing import Tuple
 import cv2
 import numpy as np
+from src.utils.pipeline_trace import traced_stage
 from .utils import ensure_dir, unique_path
 from .schemas import SketchNormalizationResult, PlatformInferenceResult
 
 
 class GeometryPreservingSketchNormalizer:
+    @traced_stage('preprocess.normalize')
     def normalize(self, sketch_path: str, platform_result: PlatformInferenceResult, output_dir: str, preserve_geometry: bool = True, input_after_orientation_correction: bool = False) -> SketchNormalizationResult:
         sp = Path(sketch_path)
         if not sp.exists():

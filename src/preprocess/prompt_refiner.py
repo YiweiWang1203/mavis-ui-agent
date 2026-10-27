@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional
+from src.utils.pipeline_trace import traced_stage
 from .schemas import OptimizedPromptSpec
 import logging
 
@@ -10,6 +11,7 @@ class PromptRefiner:
     def __init__(self, enable_llm: bool = False):
         self.enable_llm = enable_llm
 
+    @traced_stage('preprocess.prompt_refine')
     def refine(self, user_prompt: str, transcript_text: str = "", visual_hint: str = "") -> OptimizedPromptSpec:
         # Rule-based MVP refiner
         inferred_task = "ui_prototype_generation"

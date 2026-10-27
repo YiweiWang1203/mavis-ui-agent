@@ -4,6 +4,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import json
+from src.utils.pipeline_trace import traced_stage
 from .schemas import FinalSketchResult, FrameScore
 from .utils import ensure_dir, unique_path
 
@@ -27,6 +28,7 @@ class FinalSketchExtractor:
         score = max(0.0, min(1.0, (ratio - 0.01) / 0.1))
         return score
 
+    @traced_stage('preprocess.frame_select')
     def select_final_sketch(self, candidate_frame_paths: List[str], timestamps: List[float], output_dir: str, top_k: int = 5) -> FinalSketchResult:
         outd = ensure_dir(Path(output_dir))
         scores = []

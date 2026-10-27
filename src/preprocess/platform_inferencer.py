@@ -2,10 +2,12 @@ from __future__ import annotations
 from typing import Optional, List, Tuple
 from pathlib import Path
 import cv2
+from src.utils.pipeline_trace import traced_stage
 from .schemas import PlatformInferenceResult
 
 
 class PlatformRatioInferencer:
+    @traced_stage('preprocess.platform_infer')
     def infer(self, user_prompt: str, transcript_text: str, sketch_path: str, explicit_platform: Optional[str] = None, explicit_ratio: Optional[str] = None) -> PlatformInferenceResult:
         if explicit_platform:
             platform = explicit_platform

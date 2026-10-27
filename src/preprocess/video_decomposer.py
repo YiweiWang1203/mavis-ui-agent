@@ -4,6 +4,7 @@ from typing import List, Tuple, Dict, Any, Optional
 import logging
 import cv2
 import math
+from src.utils.pipeline_trace import traced_stage
 from .utils import ensure_dir, run_ffmpeg_extract_audio, unique_path
 from .schemas import VideoDecompositionResult
 
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class VideoDecomposer:
+    @traced_stage('preprocess.video_decompose')
     def decompose(self, video_path: str, output_dir: str, end_window_ratio: float = 0.3, sample_fps: float = 2.0) -> VideoDecompositionResult:
         vp = Path(video_path)
         if not vp.exists():

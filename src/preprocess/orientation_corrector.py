@@ -4,6 +4,7 @@ import logging
 from typing import Dict, Any
 import cv2
 
+from src.utils.pipeline_trace import traced_stage
 from .utils import ensure_dir, unique_path
 from .schemas import OrientationCorrectionResult
 
@@ -14,6 +15,7 @@ class OrientationCorrector:
     def __init__(self):
         pass
 
+    @traced_stage('preprocess.orientation')
     def correct(self, sketch_path: str, output_dir: str, rotation_degrees: int = 180, enabled: bool = True, reason: str = "lamp-mounted overhead camera captures the sketch upside down") -> OrientationCorrectionResult:
         inp = Path(sketch_path)
         out_root = ensure_dir(Path(output_dir))

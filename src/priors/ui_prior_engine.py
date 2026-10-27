@@ -5,6 +5,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from src.utils.pipeline_trace import traced_stage
 
 
 PRIORS_PATH = Path(__file__).with_name("ui_priors.json")
@@ -116,6 +117,7 @@ def _build_prior_element(slot_spec: dict[str, Any], viewport: dict[str, int]) ->
     }
 
 
+@traced_stage('architect.priors')
 def apply_ui_priors(
     ui_state: dict[str, Any],
     user_intent: str | None = None,

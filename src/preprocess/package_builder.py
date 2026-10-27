@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 import json
+from src.utils.pipeline_trace import traced_stage
 from .schemas import MultimodalPreprocessPackage
 from .utils import ensure_dir, unique_path
 
@@ -9,6 +10,7 @@ class MultimodalPackageBuilder:
     def __init__(self, output_dir: str):
         self.output_dir = ensure_dir(Path(output_dir))
 
+    @traced_stage('preprocess.package')
     def build(self, *, input_video: str, raw_user_prompt: str, optimized_prompt_spec, audio_path: str, transcript_text: str, candidate_frames, selected_sketch_path: str, rectified_sketch_path: str, normalized_sketch_path: str, platform_hint, preprocess_metadata: dict, errors: list, warnings: list, orientation_result=None) -> MultimodalPreprocessPackage:
         # augment preprocess_metadata with orientation info if provided
         if orientation_result is not None:

@@ -3,11 +3,13 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import cv2
 import numpy as np
+from src.utils.pipeline_trace import traced_stage
 from .utils import ensure_dir, unique_path
 from .schemas import SketchRectificationResult
 
 
 class SketchRectifier:
+    @traced_stage('preprocess.rectify')
     def rectify(self, sketch_path: str, output_dir: str) -> SketchRectificationResult:
         sp = Path(sketch_path)
         if not sp.exists():

@@ -21,6 +21,7 @@ from src.agents.ui_architect import generate_ui_state
 from src.utils.audit_logger import AuditLogger
 from src.tools import vision_tool
 from src.tools.vision_ontology_adapter import convert_vision_payload_to_ontology
+from src.utils.pipeline_trace import traced_stage
 
 logger = logging.getLogger(__name__)
 
@@ -480,6 +481,7 @@ def meeting_node(state: State) -> Command[Literal["supervisor"]]:
     )
 
 
+@traced_stage('graph.ui_architect_node')
 def ui_architect_node(state: State) -> Command[Literal["supervisor"]]:
     """Node for the UI Architect: 融合多模态数据，生成标准 JSON 契约"""
     logger.info("UI Architect 正在严谨地融合多模态数据数据...")
@@ -630,6 +632,7 @@ def sa2va_node(state: State) -> Command[Literal["supervisor"]]:
     )
 
 
+@traced_stage('graph.vision_node')
 def vision_node(state: State) -> Command[Literal["supervisor"]]:
     """Deterministic vision node: always call extract_ui_layout directly and validate."""
     logger.info("Vision node starting deterministic UI extraction")
@@ -754,6 +757,7 @@ def vision_node(state: State) -> Command[Literal["supervisor"]]:
         'messages': [HumanMessage(content=RESPONSE_FORMAT.format('vision_agent', 'Vision extraction successful'), name='vision')]
     }, goto='supervisor')
 
+@traced_stage('graph.code_node')
 def code_node(state: State) -> Command[Literal["supervisor"]]:
     """Node for the coder agent that executes Python code and saves HTML."""
     logger.info("Code agent starting task")

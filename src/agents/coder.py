@@ -12,6 +12,7 @@ except Exception:
     pass
 
 from src.agents.utils.path_manager import HTML_OUTPUT_DIR
+from src.utils.pipeline_trace import traced_stage, trace_html_contract
 
 
 DEFAULT_CODER_MODEL = os.getenv("CODER_MODEL", "Qwen/Qwen2.5-Coder-32B")
@@ -67,6 +68,7 @@ def save_html_asset(code: str) -> str | None:
     return str(file_path.resolve())
 
 
+@traced_stage('coder.generate', fields={'ui_state_json'})
 def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str:
     """Generate runnable frontend HTML from a UI-State JSON contract."""
     renderer_mode = os.getenv("UI_RENDERER_MODE", "auto").strip().lower()
@@ -81,6 +83,7 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
         supported = supports_deterministic_rendering(ui_state_json)
         if renderer_mode == "deterministic" or supported:
             code = render_ui_state_html(ui_state_json)
+            trace_html_contract(code,ui_state_json,renderer='deterministic')
             saved_path = save_html_asset(code)
             logging.getLogger(__name__).info("Deterministic HTML asset saved to: %s", saved_path)
             return {"code": code, "file_path": saved_path, "renderer": "deterministic"}
@@ -110,6 +113,8 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
 
         raw_code = response.choices[0].message.content or ""
         code = strip_markdown_code_fence(raw_code)
+        trace_html_contract(code,ui_state_json,renderer='llm',
+                    finish_reason=getattr(response.choices[0],'finish_reason',None))
 
         try:
             if audit_logger:
