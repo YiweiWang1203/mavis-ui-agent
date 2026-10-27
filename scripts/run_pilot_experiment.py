@@ -70,6 +70,19 @@ def safe_messages(messages):
     return json.loads(re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', "[retained in input image/effective_image.jpg]", text))
 
 
+def image_url_hashes(messages):
+    values = []
+    for message in messages:
+        content = message.get('content')
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get('type') == 'image_url':
+                    url = part.get('image_url', {}).get('url')
+                    if isinstance(url, str):
+                        values.append(hashlib.sha256(url.encode('utf-8')).hexdigest())
+    return values
+
+
 class TracedClient:
     def __init__(self, client, output):
         self.client, self.output, self.calls = client, output, []
@@ -80,6 +93,7 @@ class TracedClient:
         index = len(self.calls) + 1
         record = {"index": index, "stage": self.stage, "model": kwargs["model"],
                   "started_utc": datetime.now(timezone.utc).isoformat(),
+                  "request_image_url_sha256": image_url_hashes(kwargs["messages"]),
                   "request": {**kwargs, "messages": safe_messages(kwargs["messages"])}}
         self.calls.append(record)
         start = time.monotonic()
@@ -155,7 +169,7 @@ def _execute(inputs, condition, traced, output, model):
                 raise ValueError("vision_validation_failed")
         # M0 deliberately supplies None: native architect accepts absent geometry.
         traced.stage = "ui_architect"
-        if os.getenv('UI_STRUCTURE_MODE') == 'hierarchy_registry_image_v1':
+        if os.getenv('UI_STRUCTURE_MODE') in {'hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
             ui_state = ui_architect.generate_ui_state(intent, vision, image_data_url=image_url)
         else:
             ui_state = ui_architect.generate_ui_state(intent, vision)

@@ -214,17 +214,19 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
 def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None, image_data_url: str | None = None) -> dict:
     """Fuse user intent and validated vision data into a UI-State JSON contract."""
     structure_mode = os.getenv('UI_STRUCTURE_MODE', 'baseline')
-    if structure_mode not in {'baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1'}:
+    if structure_mode not in {'baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
         raise ValueError('Unsupported structure mode')
-    if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1'}:
+    if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
         from pathlib import Path
         system_prompt = (Path(__file__).resolve().parents[1]/'prompts/ui_architect_hierarchy.md').read_text(encoding='utf-8')
         if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1'}:
             system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_relation_evidence.md').read_text(encoding='utf-8')
         if structure_mode == 'hierarchy_registry_v1':
             system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_container_registry.md').read_text(encoding='utf-8')
-        if structure_mode in {'hierarchy_registry_inline_v1','hierarchy_registry_image_v1'}:
+        if structure_mode in {'hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
             system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_container_inline.md').read_text(encoding='utf-8')
+        if structure_mode == 'hierarchy_node_evidence_v1':
+            system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_node_evidence.md').read_text(encoding='utf-8')
     else:
         system_prompt = read_ui_architect_prompt()
     user_content = f"""
@@ -241,7 +243,7 @@ Return the final fused UI-State JSON.
 """
 
     request_content = user_content
-    if structure_mode == 'hierarchy_registry_image_v1':
+    if structure_mode in {'hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
         if not isinstance(image_data_url, str) or not image_data_url.startswith('data:image/') or ';base64,' not in image_data_url:
             raise ValueError('Image-grounded architect requires the existing image data URL')
         request_content = [{'type':'text','text':user_content},
@@ -267,16 +269,19 @@ Return the final fused UI-State JSON.
         raw_json_str = response.choices[0].message.content
         ui_state = json.loads(raw_json_str)
         trace_event('architect.model_parsed',output=ui_state)
-        if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1'}:
+        if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
             from src.utils.hierarchy_contract import build_structure, solve_hierarchy
-            if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1'}:
+            if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
                 from src.utils.relation_evidence import apply_relation_evidence
-                if structure_mode in {'hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1'}:
+                if structure_mode in {'hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
                     from src.utils.container_registry import compile_container_registry
                     ui_state = compile_container_registry(ui_state, vision_elements, user_intent,
-                        inline=structure_mode in {'hierarchy_registry_inline_v1','hierarchy_registry_image_v1'})
+                        inline=structure_mode in {'hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'})
+                if structure_mode == 'hierarchy_node_evidence_v1':
+                    from src.utils.node_relation_evidence import compile_node_relations
+                    ui_state = compile_node_relations(ui_state)
                 ui_state = apply_relation_evidence(ui_state, user_intent,
-                    isolate_source_errors=structure_mode in {"hierarchy_partial_evidence_v1", "hierarchy_registry_v1", "hierarchy_registry_inline_v1", "hierarchy_registry_image_v1"})
+                    isolate_source_errors=structure_mode in {"hierarchy_partial_evidence_v1", "hierarchy_registry_v1", "hierarchy_registry_inline_v1", "hierarchy_registry_image_v1", "hierarchy_node_evidence_v1"})
             return solve_hierarchy(build_structure(ui_state, vision_elements))
         repaired = repair_ui_state_with_vision(
             ui_state,

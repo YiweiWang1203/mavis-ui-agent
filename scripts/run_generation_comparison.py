@@ -90,8 +90,11 @@ def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exac
     finally:
         vision_image = next((request_image(c) for c in traced.calls if c.get('stage') == 'vision'), None)
         architect_image = next((request_image(c) for c in traced.calls if c.get('stage') == 'ui_architect'), None)
+        vision_hashes = next((c.get('request_image_url_sha256') for c in traced.calls if c.get('stage') == 'vision'), None)
+        architect_hashes = next((c.get('request_image_url_sha256') for c in traced.calls if c.get('stage') == 'ui_architect'), None)
         summary.update(architect_image_attached=bool(architect_image),
-                       architect_vision_image_match=(architect_image == vision_image) if architect_image else None)
+                       architect_vision_image_match=(architect_hashes == vision_hashes) if architect_hashes and vision_hashes else None,
+                       image_match_evidence='actual_request_url_sha256_before_redaction')
         summary.update(coder_model_called=any(c.get("stage")=="coder" for c in traced.calls),
                        elapsed_seconds=time.monotonic() - start,
                        call_count=len(traced.calls),
@@ -117,7 +120,7 @@ def main():
                         default=['baseline','native_controls_v1'],help='Use baseline alone for trace collection, not an optimization comparison')
     parser.add_argument('--fusion-modes', nargs='+', choices=['exact_id', 'source_alignment_v1'],
                         default=['exact_id'], help='Compare a fusion mechanism with identical coder prompts')
-    parser.add_argument('--structure-modes', nargs='+', choices=['baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1'], default=['baseline'])
+    parser.add_argument('--structure-modes', nargs='+', choices=['baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'], default=['baseline'])
     args = parser.parse_args()
     if len(args.modes)!=len(set(args.modes)):
         parser.error('modes must be unique')
