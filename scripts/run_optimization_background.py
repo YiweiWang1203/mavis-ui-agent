@@ -21,7 +21,7 @@ def main():
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--state', type=Path)
     parser.add_argument('--worker-token')
-    parser.add_argument('--trial', choices=['source_alignment','hierarchy'], default='source_alignment')
+    parser.add_argument('--trial', choices=['source_alignment','hierarchy','placement'], default='source_alignment')
     args = parser.parse_args()
     project = args.project.resolve()
     head = subprocess.check_output(['git','rev-parse','HEAD'], cwd=ROOT, text=True).strip()
@@ -36,7 +36,7 @@ def main():
     lock = cycles/'active_generation.lock'
     if not args.worker_token:
         token = uuid.uuid4().hex
-        round_id = '05' if args.trial=='hierarchy' else '04'
+        round_id = {'hierarchy':'05','source_alignment':'04','placement':'06'}[args.trial]
         state = cycles/('round'+round_id+'_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+token[:6])
         # Exclusive global reservation: never silently clear an existing lock.
         with lock.open('x', encoding='utf-8') as f:
@@ -46,7 +46,7 @@ def main():
             record = {'round':round_id,'status':'launching','head':head,'checkout':str(ROOT),
                 'case':str(case),'result_root':str(state/'results'), 'token':token,
                 'command_budget':{'max_calls':6,'max_tokens_per_stage':8192,'timeout_seconds':600,'automatic_retries':0},
-                'goal':'Hierarchy and source contract' if args.trial=='hierarchy' else 'Source identity correspondence'}
+                'goal':{'hierarchy':'Hierarchy and source contract','placement':'Compiled page-global placement contract','source_alignment':'Source identity correspondence'}[args.trial]}
             write(state/'run.json',record)
             with (state/'worker.log').open('ab', buffering=0) as log:
                 child = subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--project',str(project),
@@ -70,6 +70,10 @@ def main():
         '--output-root',str(state/'results')]
     if args.trial=='hierarchy':
         command = command[:command.index('--fusion-modes')] + ['--fusion-modes','source_alignment_v1','--structure-modes','baseline','hierarchy_v1','--output-root',str(state/'results')]
+    if args.trial=='placement':
+        command = [sys.executable,'-u',str(ROOT/'scripts/run_generation_comparison.py'),
+            '--cases',str(case),'--modes','baseline','placement_v1','--fusion-modes','source_alignment_v1',
+            '--structure-modes','hierarchy_v1','--output-root',str(state/'results')]
     record.update(status='running',worker_pid=os.getpid(),command=command)
     write(state/'run.json',record)
     environment = dict(os.environ, MAVIS_ENV_FILE=str(project/'.env'))
