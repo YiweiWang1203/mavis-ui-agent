@@ -214,13 +214,15 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
 def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None) -> dict:
     """Fuse user intent and validated vision data into a UI-State JSON contract."""
     structure_mode = os.getenv('UI_STRUCTURE_MODE', 'baseline')
-    if structure_mode not in {'baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1'}:
+    if structure_mode not in {'baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1'}:
         raise ValueError('Unsupported structure mode')
-    if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1'}:
+    if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1'}:
         from pathlib import Path
         system_prompt = (Path(__file__).resolve().parents[1]/'prompts/ui_architect_hierarchy.md').read_text(encoding='utf-8')
-        if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1'}:
+        if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1'}:
             system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_relation_evidence.md').read_text(encoding='utf-8')
+        if structure_mode == 'hierarchy_registry_v1':
+            system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_container_registry.md').read_text(encoding='utf-8')
     else:
         system_prompt = read_ui_architect_prompt()
     user_content = f"""
@@ -253,12 +255,15 @@ Return the final fused UI-State JSON.
         raw_json_str = response.choices[0].message.content
         ui_state = json.loads(raw_json_str)
         trace_event('architect.model_parsed',output=ui_state)
-        if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1'}:
+        if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1'}:
             from src.utils.hierarchy_contract import build_structure, solve_hierarchy
-            if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1'}:
+            if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1'}:
                 from src.utils.relation_evidence import apply_relation_evidence
+                if structure_mode == 'hierarchy_registry_v1':
+                    from src.utils.container_registry import compile_container_registry
+                    ui_state = compile_container_registry(ui_state, vision_elements, user_intent)
                 ui_state = apply_relation_evidence(ui_state, user_intent,
-                    isolate_source_errors=structure_mode == "hierarchy_partial_evidence_v1")
+                    isolate_source_errors=structure_mode in {"hierarchy_partial_evidence_v1", "hierarchy_registry_v1"})
             return solve_hierarchy(build_structure(ui_state, vision_elements))
         repaired = repair_ui_state_with_vision(
             ui_state,

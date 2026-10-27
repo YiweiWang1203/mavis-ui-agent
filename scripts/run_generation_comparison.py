@@ -103,7 +103,7 @@ def main():
                         default=['baseline','native_controls_v1'],help='Use baseline alone for trace collection, not an optimization comparison')
     parser.add_argument('--fusion-modes', nargs='+', choices=['exact_id', 'source_alignment_v1'],
                         default=['exact_id'], help='Compare a fusion mechanism with identical coder prompts')
-    parser.add_argument('--structure-modes', nargs='+', choices=['baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1'], default=['baseline'])
+    parser.add_argument('--structure-modes', nargs='+', choices=['baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1'], default=['baseline'])
     args = parser.parse_args()
     if len(args.modes)!=len(set(args.modes)):
         parser.error('modes must be unique')
