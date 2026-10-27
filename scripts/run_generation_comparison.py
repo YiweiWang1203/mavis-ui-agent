@@ -46,9 +46,9 @@ def source_record():
     return result
 
 
-def run_one(inputs, mode, folder, model, provider, provenance):
+def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exact_id'):
     folder.mkdir(exist_ok=False)
-    summary = dict(provenance, mode=mode, condition='M2', model=model, status='started',
+    summary = dict(provenance, mode=mode, fusion_mode=fusion_mode, condition='M2', model=model, status='started',
                    behavior_evaluated=False, generation_kind='fresh_end_to_end',
                    output_html_repair=False, max_tokens_per_stage=8192,
                    timeout_seconds_per_stage=600, max_retries=0,
@@ -58,6 +58,7 @@ def run_one(inputs, mode, folder, model, provider, provenance):
     start = time.monotonic()
     # Set for each arm, do not inherit an accidental local repair/renderer setting.
     os.environ.update(UI_CODER_CONTRACT_MODE=mode, UI_INPUT_CONTRACT_MODE='off',
+                      UI_FUSION_MODE=fusion_mode,
                       UI_RENDERER_MODE='llm', LAYOUT_SOLVER_ENABLED='1',
                       VISION_MODEL=model, CODER_MODEL=model, CODER_PROD_MODEL=model)
     try:
@@ -92,9 +93,13 @@ def main():
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--modes',nargs='+',choices=['baseline','native_controls_v1'],
                         default=['baseline','native_controls_v1'],help='Use baseline alone for trace collection, not an optimization comparison')
+    parser.add_argument('--fusion-modes', nargs='+', choices=['exact_id', 'source_alignment_v1'],
+                        default=['exact_id'], help='Compare a fusion mechanism with identical coder prompts')
     args = parser.parse_args()
     if len(args.modes)!=len(set(args.modes)):
         parser.error('modes must be unique')
+    if len(args.fusion_modes) != len(set(args.fusion_modes)):
+        parser.error('fusion modes must be unique')
     # Validate every case before creating runs or making calls.
     loaded = [load_inputs(p.resolve(), 'M2') for p in args.cases]
     provenance = source_record()
@@ -115,7 +120,8 @@ def main():
         hashes = {key: sha256(p) for key, p in copied['files'].items()}
         frozen.append((dest, copied, hashes))
     manifest = dict(provenance, status='dry_run_only' if args.dry_run else 'started',
-                    model=args.model, call_limit=3 * len(args.modes) * len(frozen), modes=args.modes,
+                    model=args.model, call_limit=3 * len(args.modes) * len(args.fusion_modes) * len(frozen), modes=args.modes,
+                    fusion_modes=args.fusion_modes,
                     cases=[{'source_case': str(p.resolve()), 'folder': str(d), 'input_sha256': h}
                            for p, (d, _, h) in zip(args.cases, frozen)], runs=[])
     write_json(batch / 'batch.json', manifest)
@@ -141,13 +147,15 @@ def main():
     provider = OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600)
     failed = False
     for index, (dest, inputs, hashes) in enumerate(frozen):
-        order = list(args.modes) if index % 2 == 0 else list(reversed(args.modes))
-        for mode in order:
+        arms = [(fusion, mode) for fusion in args.fusion_modes for mode in args.modes]
+        order = arms if index % 2 == 0 else list(reversed(arms))
+        for fusion_mode, mode in order:
             if hashes != {k: sha256(p) for k, p in inputs['files'].items()} or source_record() != provenance:
                 raise RuntimeError('Inputs or code changed during batch; stopped')
-            run = run_one(inputs, mode, dest / mode, args.model, provider,
-                          dict(provenance, input_sha256=hashes, endpoint=endpoint))
-            manifest['runs'].append({'folder': str(dest / mode), 'status': run['status']})
+            label = mode if len(args.fusion_modes) == 1 and fusion_mode == 'exact_id' else fusion_mode + '__' + mode
+            run = run_one(inputs, mode, dest / label, args.model, provider,
+                          dict(provenance, input_sha256=hashes, endpoint=endpoint), fusion_mode=fusion_mode)
+            manifest['runs'].append({'folder': str(dest / label), 'fusion_mode': fusion_mode, 'mode': mode, 'status': run['status']})
             failed |= run['status'] != 'html_generated_pending_browser_validation'
             write_json(batch / 'batch.json', manifest)
     manifest['status'] = 'generation_finished_with_failures' if failed else 'generation_finished_pending_browser_validation'

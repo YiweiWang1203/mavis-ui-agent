@@ -147,6 +147,18 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
     if not isinstance(model_elements, list):
         model_elements = []
 
+    fusion_mode = os.getenv('UI_FUSION_MODE', 'exact_id')
+    if fusion_mode not in {'exact_id', 'source_alignment_v1'}:
+        raise ValueError('Unsupported UI_FUSION_MODE')
+    if fusion_mode == 'source_alignment_v1':
+        from src.utils.source_alignment import align_source_ids
+        model_elements, alignment = align_source_ids(model_elements, list(vision_by_id.values()), viewport)
+        trace_event('architect.source_alignment', decisions=alignment,
+                    policy='reciprocal_geometry_type_text_v1')
+        page_meta['source_alignment'] = {'version': 'v1',
+            'matched_count': sum(d['vision_id'] is not None for d in alignment),
+            'unresolved_count': sum(d['vision_id'] is None for d in alignment)}
+
     used_ids: set[str] = set()
     decisions = []
     repaired_elements: list[dict[str, Any]] = []
@@ -186,12 +198,15 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
 
     for vision_id, vision_element in vision_by_id.items():
         if vision_id not in used_ids:
-            repaired_elements.append(_fallback_element_from_vision(vision_element, viewport))
+            fallback = _fallback_element_from_vision(vision_element, viewport)
+            if fusion_mode == 'source_alignment_v1':
+                fallback['source_refs'] = [{'source': 'vision', 'id': vision_id}]
+            repaired_elements.append(fallback)
             decisions.append({'id':vision_id,'decision':'append_vision_fallback','reason':'vision_id_not_used_by_model'})
 
     repaired["elements"] = repaired_elements
     trace_event('architect.geometry_merge.decisions',decisions=decisions,
-                matching_policy='exact_id_only_no_semantic_matching')
+                matching_policy=fusion_mode)
     return repaired
 
 
