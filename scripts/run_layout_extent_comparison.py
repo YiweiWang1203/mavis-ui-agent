@@ -42,7 +42,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',required=True,type=Path)
     parser.add_argument('--output-root',required=True,type=Path)
-    parser.add_argument('--comparison',choices=['layout','relations'],default='layout')
+    parser.add_argument('--comparison',choices=['layout','relations','empty_slots'],default='layout')
     args=parser.parse_args()
     provenance=source_record();inputs=load_inputs(args.case.resolve(),'M2')
     stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8]
@@ -63,8 +63,8 @@ def main():
     os.environ.update(SILICONFLOW_BASE_URL=endpoint,VISION_MODEL=model,CODER_MODEL=model,CODER_PROD_MODEL=model,
         UI_STRUCTURE_MODE='hierarchy_registry_image_v1',UI_FUSION_MODE='source_alignment_v1',
         UI_CODER_CONTRACT_MODE='controlled_components_v1',UI_RENDERER_MODE='controlled_components_v1',
-        UI_RELATION_SPECIALIST_MODE='container_slots_v1',UI_RELATION_AGGREGATION_MODE='off',
-        UI_HIERARCHY_LAYOUT_MODE='container_extent_v1' if args.comparison=='relations' else 'baseline',
+        UI_RELATION_SPECIALIST_MODE='container_slots_v1',UI_RELATION_AGGREGATION_MODE='validated_union_v1' if args.comparison=='empty_slots' else 'off',
+        UI_HIERARCHY_LAYOUT_MODE='container_extent_v1' if args.comparison in {'relations','empty_slots'} else 'baseline',
         UI_INPUT_CONTRACT_MODE='off',LAYOUT_SOLVER_ENABLED='1')
     from openai import OpenAI
     provider=CappedProvider(OpenAI(api_key=key,base_url=endpoint,max_retries=0,timeout=600),limit=3)
@@ -78,7 +78,7 @@ def main():
     except Exception as error:write_json(shared/'failure.json',{'error_type':type(error).__name__})
     if (shared/'ui_state.json').is_file():baseline_state=json.loads((shared/'ui_state.json').read_text(encoding='utf-8'))
     elapsed=time.monotonic()-start
-    candidate=case/('relation_union' if args.comparison=='relations' else 'container_extent');candidate.mkdir()
+    candidate=case/({'relations':'relation_union','empty_slots':'empty_slot_guard'}.get(args.comparison,'container_extent'));candidate.mkdir()
     candidate_code=None;candidate_state={'error':'no_valid_current_pre_layout_state'}
     common=dict(provenance,model=model,condition='M2',input_sha256=hashes,shared_call_count=len(client.calls),
         shared_request_path=str(shared),shared_usage=[c.get('response',{}).get('usage') for c in client.calls],
@@ -86,8 +86,34 @@ def main():
         fusion_mode='source_alignment_v1',structure_mode='hierarchy_registry_image_v1',
         shared_artifact_sha256={p.relative_to(shared).as_posix():sha256(p) for p in shared.rglob('*') if p.is_file()})
     try:
-        state=fresh_refinement_output(shared) if args.comparison=='relations' else fresh_layout_input(shared)
-        state_path=case/('shared_refinement_state.json' if args.comparison=='relations' else 'shared_pre_layout_state.json')
+        if args.comparison=='empty_slots':
+            from src.utils.relation_evidence import DESCRIPTORS, CONTAINER_ALIASES
+            parsed_files=list((shared/'pipeline_trace').glob('*_architect_model_parsed.json'))
+            if len(parsed_files)!=1:raise ValueError('Expected one fresh architecture response')
+            trace_manifest=json.loads((shared/'pipeline_trace/manifest.json').read_text(encoding='utf-8'))
+            parsed_event=[e for e in trace_manifest['events'] if e['stage']=='architect.model_parsed']
+            if len(parsed_event)!=1 or parsed_event[0]['sha256']!=sha256(parsed_files[0]):
+                raise ValueError('Fresh architecture trace hash mismatch')
+            common['shared_architect_state_sha256']=sha256(parsed_files[0])
+            state=json.loads(parsed_files[0].read_text(encoding='utf-8'))['output']
+            empty=not any(CONTAINER_ALIASES.get(e.get('type'),e.get('type')) in DESCRIPTORS for e in state['elements'])
+            if empty:
+                from src.agents.relation_specialist import refine_relation_state
+                intent=inputs['prompt']+'\n\n[Spoken transcript]\n'+inputs['transcript']
+                state=refine_relation_state(state,intent,model,None,mode='container_slots_guard_v1')
+                # Two upstream calls shared; the old unnecessary third call is
+                # baseline-only, even though its raw evidence lives in shared_upstream.
+                common['shared_call_count']=min(2,len(client.calls))
+                common['shared_usage']=[c.get('response',{}).get('usage') for c in client.calls[:2]]
+            else:
+                state=fresh_refinement_output(shared)
+            common['empty_slot_guard_triggered']=empty
+            common['physical_call_allocation']={'shared_indices':list(range(1,common['shared_call_count']+1)),
+                'baseline_exclusive_indices':list(range(common['shared_call_count']+1,len(client.calls)+1)),
+                'candidate_exclusive_indices':[]}
+        else:
+            state=fresh_refinement_output(shared) if args.comparison=='relations' else fresh_layout_input(shared)
+        state_path=case/('shared_refinement_state.json' if args.comparison in {'relations','empty_slots'} else 'shared_pre_layout_state.json')
         write_json(state_path,state)
         common['shared_branch_input_sha256']=sha256(state_path)
         if args.comparison=='layout':common['shared_pre_layout_sha256']=sha256(state_path)
@@ -96,7 +122,7 @@ def main():
         from src.utils.hierarchy_contract import solve_hierarchy
         from src.renderers.controlled_components import render_controlled_components
         with PipelineTrace(candidate/'pipeline_trace',{'entrypoint':'fresh_shared_state_comparison','comparison':args.comparison,'branch_input_sha256':common['shared_branch_input_sha256']}):
-            if args.comparison=='relations':
+            if args.comparison in {'relations','empty_slots'}:
                 from src.agents.ui_architect import finalize_ui_state
                 os.environ['UI_RELATION_AGGREGATION_MODE']='validated_union_v1'
                 vision=json.loads((shared/'vision_validated.json').read_text(encoding='utf-8'))
@@ -113,7 +139,8 @@ def main():
         os.environ['UI_HIERARCHY_LAYOUT_MODE']='baseline'
         os.environ['UI_RELATION_AGGREGATION_MODE']='off'
     for folder,state,code in [(case/'baseline',baseline_state,baseline_code),(candidate,candidate_state,candidate_code)]:
-        summary=persist_arm(folder,state,code,dict(common,arm=folder.name),[])
+        exclusive=client.calls[common['shared_call_count']:] if args.comparison=='empty_slots' and folder.name=='baseline' else []
+        summary=persist_arm(folder,state,code,dict(common,arm=folder.name),exclusive)
         manifest['runs'].append({'folder':str(folder),'status':summary['status']})
     manifest.update(actual_total_calls=provider.count,status='generation_finished_pending_browser_validation' if baseline_code and candidate_code else 'generation_finished_with_failures')
     write_json(batch/'batch.json',manifest);shutil.make_archive(str(batch),'zip',root_dir=batch)
