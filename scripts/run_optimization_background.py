@@ -21,7 +21,7 @@ def main():
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--state', type=Path)
     parser.add_argument('--worker-token')
-    parser.add_argument('--trial', choices=['source_alignment','hierarchy','placement','typed_controls','controlled','relations','partial_relations','container_registry'], default='source_alignment')
+    parser.add_argument('--trial', choices=['source_alignment','hierarchy','placement','typed_controls','controlled','relations','partial_relations','container_registry','inline_registry'], default='source_alignment')
     args = parser.parse_args()
     project = args.project.resolve()
     head = subprocess.check_output(['git','rev-parse','HEAD'], cwd=ROOT, text=True).strip()
@@ -36,7 +36,7 @@ def main():
     lock = cycles/'active_generation.lock'
     if not args.worker_token:
         token = uuid.uuid4().hex
-        round_id = {'hierarchy':'05','source_alignment':'04','placement':'06','typed_controls':'07','controlled':'08','relations':'09','partial_relations':'10','container_registry':'11'}[args.trial]
+        round_id = {'hierarchy':'05','source_alignment':'04','placement':'06','typed_controls':'07','controlled':'08','relations':'09','partial_relations':'10','container_registry':'11','inline_registry':'12'}[args.trial]
         state = cycles/('round'+round_id+'_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+token[:6])
         # Exclusive global reservation: never silently clear an existing lock.
         with lock.open('x', encoding='utf-8') as f:
@@ -45,8 +45,8 @@ def main():
             state.mkdir(exist_ok=False)
             record = {'round':round_id,'status':'launching','head':head,'checkout':str(ROOT),
                 'case':str(case),'result_root':str(state/'results'), 'token':token,
-                'command_budget':{'max_calls':{'controlled':5,'relations':4,'partial_relations':4,'container_registry':4}.get(args.trial,6),'max_tokens_per_stage':8192,'timeout_seconds':600,'automatic_retries':0},
-                'goal':{'hierarchy':'Hierarchy and source contract','placement':'Compiled page-global placement contract','source_alignment':'Source identity correspondence','typed_controls':'Typed native component implementation','controlled':'Controlled component generation','relations':'Source-grounded containment ledger','partial_relations':'Isolate local relation source errors','container_registry':'Source-backed container registry and reference closure'}[args.trial]}
+                'command_budget':{'max_calls':{'controlled':5,'relations':4,'partial_relations':4,'container_registry':4,'inline_registry':4}.get(args.trial,6),'max_tokens_per_stage':8192,'timeout_seconds':600,'automatic_retries':0},
+                'goal':{'hierarchy':'Hierarchy and source contract','placement':'Compiled page-global placement contract','source_alignment':'Source identity correspondence','typed_controls':'Typed native component implementation','controlled':'Controlled component generation','relations':'Source-grounded containment ledger','partial_relations':'Isolate local relation source errors','container_registry':'Source-backed container registry and reference closure','inline_registry':'Compile source-backed containers from one node table'}[args.trial]}
             write(state/'run.json',record)
             with (state/'worker.log').open('ab', buffering=0) as log:
                 child = subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--project',str(project),
@@ -94,6 +94,10 @@ def main():
         command = [sys.executable,'-u',str(ROOT/'scripts/run_generation_comparison.py'),
             '--cases',str(case),'--modes','controlled_components_v1','--fusion-modes','source_alignment_v1',
             '--structure-modes','hierarchy_partial_evidence_v1','hierarchy_registry_v1','--output-root',str(state/'results')]
+    if args.trial=='inline_registry':
+        command = [sys.executable,'-u',str(ROOT/'scripts/run_generation_comparison.py'),
+            '--cases',str(case),'--modes','controlled_components_v1','--fusion-modes','source_alignment_v1',
+            '--structure-modes','hierarchy_registry_v1','hierarchy_registry_inline_v1','--output-root',str(state/'results')]
     record.update(status='running',worker_pid=os.getpid(),command=command)
     write(state/'run.json',record)
     environment = dict(os.environ, MAVIS_ENV_FILE=str(project/'.env'))

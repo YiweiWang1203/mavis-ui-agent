@@ -7,8 +7,19 @@ from src.utils.relation_evidence import CONTAINER_ALIASES, DESCRIPTORS, normaliz
 
 
 @traced_stage('architect.container_registry')
-def compile_container_registry(state, vision_elements, user_intent):
+def compile_container_registry(state, vision_elements, user_intent, inline=False):
     result = copy.deepcopy(state)
+    if not isinstance(inline, bool):
+        raise ValueError('Invalid registry representation policy')
+    if inline:
+        if result.get('containers') not in (None, []):
+            raise ValueError('Single node table forbids secondary container declarations')
+        nodes = result.get('elements')
+        if not isinstance(nodes, list) or any(not isinstance(e, dict) for e in nodes):
+            raise ValueError('Missing or invalid single node table')
+        # Move declarations, do not copy/add nodes or infer undeclared parents.
+        result['containers'] = [e for e in nodes if CONTAINER_ALIASES.get(e.get('type'), e.get('type')) in DESCRIPTORS]
+        result['elements'] = [e for e in nodes if CONTAINER_ALIASES.get(e.get('type'), e.get('type')) not in DESCRIPTORS]
     registry = result.get('containers')
     elements = result.get('elements')
     if not isinstance(registry, list) or not isinstance(elements, list):
@@ -76,5 +87,6 @@ def compile_container_registry(state, vision_elements, user_intent):
             raise ValueError('Undeclared registry relationship endpoint')
     result.setdefault('page_meta', {})['container_registry'] = {
         'version': 'source-backed-v1', 'declared_count': len(declarations),
+        'representation': 'single_node_table' if inline else 'separate_container_table',
         'declarations': declarations, 'semantic_review': 'required; lexical anchors do not prove container meaning'}
     return result
