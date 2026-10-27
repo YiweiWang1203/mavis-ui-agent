@@ -88,7 +88,9 @@ class RelationSpecialistTests(unittest.TestCase):
         self.assertEqual(result['elements'][0]['parent_id'], 'region')
 
     def test_failure_summary_uses_actual_shared_calls(self):
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / 'outputs/optimization_cycles') as folder:
+        root = Path(__file__).resolve().parents[1] / 'outputs/optimization_cycles'
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root) as folder:
             summary = persist_arm(Path(folder), {}, None, {'shared_call_count':1}, [])
         self.assertEqual(summary['effective_call_count'], 1)
         self.assertEqual(summary['shared_call_count'], 1)
