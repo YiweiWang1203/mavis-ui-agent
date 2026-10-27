@@ -213,7 +213,14 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
 @traced_stage('architect.generate')
 def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None) -> dict:
     """Fuse user intent and validated vision data into a UI-State JSON contract."""
-    system_prompt = read_ui_architect_prompt()
+    structure_mode = os.getenv('UI_STRUCTURE_MODE', 'baseline')
+    if structure_mode not in {'baseline','hierarchy_v1'}:
+        raise ValueError('Unsupported structure mode')
+    if structure_mode == 'hierarchy_v1':
+        from pathlib import Path
+        system_prompt = (Path(__file__).resolve().parents[1]/'prompts/ui_architect_hierarchy.md').read_text(encoding='utf-8')
+    else:
+        system_prompt = read_ui_architect_prompt()
     user_content = f"""
 [User Intent]
 {user_intent}
@@ -244,6 +251,9 @@ Return the final fused UI-State JSON.
         raw_json_str = response.choices[0].message.content
         ui_state = json.loads(raw_json_str)
         trace_event('architect.model_parsed',output=ui_state)
+        if structure_mode == 'hierarchy_v1':
+            from src.utils.hierarchy_contract import build_structure, solve_hierarchy
+            return solve_hierarchy(build_structure(ui_state, vision_elements))
         repaired = repair_ui_state_with_vision(
             ui_state,
             vision_elements,

@@ -89,6 +89,8 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
             return {"code": code, "file_path": saved_path, "renderer": "deterministic"}
 
     system_prompt = read_coder_prompt()
+    if (ui_state_json.get('page_meta',{}).get('layout_solver') or {}).get('version') == 'hierarchy-v1':
+        system_prompt += "\nHierarchy contract overrides conflicting placement advice: preserve each id once, exact bbox size and page-global position; do not expand or globally repack controls. Render all elements absolutely under one positioned page root, and attach data-parent-id for non-root elements. Parent backgrounds are permitted behind children. Do not render children a second time through children_ids. Use border-box, zero root/body margins. Render visible region boundaries for drawn containers and image placeholders.\n"
     user_content = (
         "Generate runnable frontend code from the following UI-State JSON.\n\n"
         f"{json.dumps(ui_state_json, ensure_ascii=False, indent=2)}"

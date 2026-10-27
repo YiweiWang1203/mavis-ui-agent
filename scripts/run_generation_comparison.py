@@ -46,9 +46,9 @@ def source_record():
     return result
 
 
-def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exact_id'):
+def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exact_id', structure_mode='baseline'):
     folder.mkdir(exist_ok=False)
-    summary = dict(provenance, mode=mode, fusion_mode=fusion_mode, condition='M2', model=model, status='started',
+    summary = dict(provenance, mode=mode, fusion_mode=fusion_mode, structure_mode=structure_mode, condition='M2', model=model, status='started',
                    behavior_evaluated=False, generation_kind='fresh_end_to_end',
                    output_html_repair=False, max_tokens_per_stage=8192,
                    timeout_seconds_per_stage=600, max_retries=0,
@@ -58,7 +58,7 @@ def run_one(inputs, mode, folder, model, provider, provenance, fusion_mode='exac
     start = time.monotonic()
     # Set for each arm, do not inherit an accidental local repair/renderer setting.
     os.environ.update(UI_CODER_CONTRACT_MODE=mode, UI_INPUT_CONTRACT_MODE='off',
-                      UI_FUSION_MODE=fusion_mode,
+                      UI_FUSION_MODE=fusion_mode, UI_STRUCTURE_MODE=structure_mode,
                       UI_RENDERER_MODE='llm', LAYOUT_SOLVER_ENABLED='1',
                       VISION_MODEL=model, CODER_MODEL=model, CODER_PROD_MODEL=model)
     try:
@@ -95,11 +95,14 @@ def main():
                         default=['baseline','native_controls_v1'],help='Use baseline alone for trace collection, not an optimization comparison')
     parser.add_argument('--fusion-modes', nargs='+', choices=['exact_id', 'source_alignment_v1'],
                         default=['exact_id'], help='Compare a fusion mechanism with identical coder prompts')
+    parser.add_argument('--structure-modes', nargs='+', choices=['baseline','hierarchy_v1'], default=['baseline'])
     args = parser.parse_args()
     if len(args.modes)!=len(set(args.modes)):
         parser.error('modes must be unique')
     if len(args.fusion_modes) != len(set(args.fusion_modes)):
         parser.error('fusion modes must be unique')
+    if len(args.structure_modes)!=len(set(args.structure_modes)):
+        parser.error('structure modes must be unique')
     # Validate every case before creating runs or making calls.
     loaded = [load_inputs(p.resolve(), 'M2') for p in args.cases]
     provenance = source_record()
@@ -120,8 +123,8 @@ def main():
         hashes = {key: sha256(p) for key, p in copied['files'].items()}
         frozen.append((dest, copied, hashes))
     manifest = dict(provenance, status='dry_run_only' if args.dry_run else 'started',
-                    model=args.model, call_limit=3 * len(args.modes) * len(args.fusion_modes) * len(frozen), modes=args.modes,
-                    fusion_modes=args.fusion_modes,
+                    model=args.model, call_limit=3 * len(args.modes) * len(args.fusion_modes) * len(args.structure_modes) * len(frozen), modes=args.modes,
+                    fusion_modes=args.fusion_modes, structure_modes=args.structure_modes,
                     cases=[{'source_case': str(p.resolve()), 'folder': str(d), 'input_sha256': h}
                            for p, (d, _, h) in zip(args.cases, frozen)], runs=[])
     write_json(batch / 'batch.json', manifest)
@@ -147,15 +150,17 @@ def main():
     provider = OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600)
     failed = False
     for index, (dest, inputs, hashes) in enumerate(frozen):
-        arms = [(fusion, mode) for fusion in args.fusion_modes for mode in args.modes]
+        arms = [(fusion, mode, structure) for fusion in args.fusion_modes for mode in args.modes for structure in args.structure_modes]
         order = arms if index % 2 == 0 else list(reversed(arms))
-        for fusion_mode, mode in order:
+        for fusion_mode, mode, structure_mode in order:
             if hashes != {k: sha256(p) for k, p in inputs['files'].items()} or source_record() != provenance:
                 raise RuntimeError('Inputs or code changed during batch; stopped')
             label = mode if len(args.fusion_modes) == 1 and fusion_mode == 'exact_id' else fusion_mode + '__' + mode
+            if len(args.structure_modes)>1 or structure_mode!='baseline':
+                label += '__' + structure_mode
             run = run_one(inputs, mode, dest / label, args.model, provider,
-                          dict(provenance, input_sha256=hashes, endpoint=endpoint), fusion_mode=fusion_mode)
-            manifest['runs'].append({'folder': str(dest / label), 'fusion_mode': fusion_mode, 'mode': mode, 'status': run['status']})
+                          dict(provenance, input_sha256=hashes, endpoint=endpoint), fusion_mode=fusion_mode, structure_mode=structure_mode)
+            manifest['runs'].append({'folder': str(dest / label), 'fusion_mode': fusion_mode, 'structure_mode': structure_mode, 'mode': mode, 'status': run['status']})
             failed |= run['status'] != 'html_generated_pending_browser_validation'
             write_json(batch / 'batch.json', manifest)
     manifest['status'] = 'generation_finished_with_failures' if failed else 'generation_finished_pending_browser_validation'
