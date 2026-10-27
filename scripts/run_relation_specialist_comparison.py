@@ -82,7 +82,7 @@ def main():
     os.environ.update(SILICONFLOW_BASE_URL=endpoint, VISION_MODEL=model, CODER_MODEL=model, CODER_PROD_MODEL=model,
         UI_STRUCTURE_MODE='hierarchy_registry_image_v1', UI_FUSION_MODE='source_alignment_v1',
         UI_CODER_CONTRACT_MODE='controlled_components_v1', UI_RENDERER_MODE='controlled_components_v1',
-        UI_RELATION_SPECIALIST_MODE='off', UI_INPUT_CONTRACT_MODE='off', LAYOUT_SOLVER_ENABLED='1')
+        UI_RELATION_SPECIALIST_MODE='off', UI_HIERARCHY_LAYOUT_MODE='baseline', UI_INPUT_CONTRACT_MODE='off', LAYOUT_SOLVER_ENABLED='1')
     from openai import OpenAI
     gate = CappedProvider(OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600))
     client = BudgetClient(gate, shared)

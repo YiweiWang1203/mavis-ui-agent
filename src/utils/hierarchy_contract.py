@@ -1,6 +1,7 @@
 """Source-preserving hierarchical geometry in page-global coordinates."""
 import copy
 import math
+import os
 from collections import defaultdict
 from src.utils.pipeline_trace import traced_stage, trace_event
 
@@ -77,19 +78,41 @@ def contains(a,b):
 def solve_hierarchy(ui_state):
     result=copy.deepcopy(ui_state);view=result['page_meta']['viewport'];index={e['id']:e for e in result['elements']}
     root=[0,0,view['width'],view['height']];done=set();decisions=[]
+    mode=os.getenv('UI_HIERARCHY_LAYOUT_MODE','baseline')
+    if mode not in {'baseline','container_extent_v1'}:raise ValueError('Unsupported hierarchy layout mode')
+    original={eid:box(e['spatial_info']['bbox']) for eid,e in index.items()}
+    desired=copy.deepcopy(original);extent_decisions=[]
+    if mode=='container_extent_v1':
+        children=defaultdict(list)
+        for eid,e in index.items():
+            if e['parent_id'] is not None:children[e['parent_id']].append(eid)
+        visited=set();active=set()
+        def expand(eid):
+            if eid in visited:return
+            if eid in active:raise ValueError('Hierarchy cycle')
+            active.add(eid)
+            for child in children[eid]:expand(child)
+            if children[eid]:
+                if index[eid].get('type') not in CONTAINERS:raise ValueError('Invalid extent parent container')
+                boxes=[original[eid]]+[desired[c] for c in children[eid]]
+                desired[eid]=[min(b[0] for b in boxes),min(b[1] for b in boxes),max(b[2] for b in boxes),max(b[3] for b in boxes)]
+                extent_decisions.append({'id':eid,'children':children[eid],'evidence_bbox':original[eid],
+                    'desired_bbox':desired[eid],'reason':'validated_child_extent_union'})
+            active.remove(eid);visited.add(eid)
+        for eid in index:expand(eid)
     def place(eid):
         if eid in done:return
         e=index[eid];parent=e['parent_id']
         if parent is not None:place(parent)
         bounds=index[parent]['spatial_info']['bbox'] if parent else root
-        spatial=e['spatial_info'];evidence=box(spatial['bbox'])
+        spatial=e['spatial_info'];evidence=desired[eid]
         w=min(evidence[2]-evidence[0],bounds[2]-bounds[0]);h=min(evidence[3]-evidence[1],bounds[3]-bounds[1])
         # Do not manufacture one-pixel controls to disguise insufficient space.
         if e.get('type') in {'button','input','search_input','search_bar','textarea','select'} and (w<24 or h<24):
             raise ValueError('Insufficient control space in parent')
         x=min(max(evidence[0],bounds[0]),bounds[2]-w);y=min(max(evidence[1],bounds[1]),bounds[3]-h)
         render=[x,y,x+w,y+h]
-        spatial.update(evidence_bbox=evidence,bbox=render,source='hierarchy_layout_v1',coordinate_space='page_global')
+        spatial.update(evidence_bbox=original[eid],bbox=render,source='hierarchy_layout_v1',coordinate_space='page_global')
         decisions.append({'id':eid,'parent_id':parent,'changed':evidence!=render,'reason':'fit_within_parent' if evidence!=render else 'preserve_evidence'})
         done.add(eid)
     for eid in index:place(eid)
@@ -102,6 +125,7 @@ def solve_hierarchy(ui_state):
                 overlap=min(x[2],y[2])>max(x[0],y[0]) and min(x[3],y[3])>max(x[1],y[1])
                 if overlap and not (a.get('allow_overlay') is True or b.get('allow_overlay') is True):conflicts.append([a['id'],b['id']])
     result['page_meta']['layout_solver']={'version':'hierarchy-v1','coordinate_space':'page_global',
-        'element_count':len(index),'sibling_conflicts':conflicts,'status':'conflicts_reported' if conflicts else 'validated_geometry'}
-    trace_event('architect.hierarchy_layout.decisions',decisions=decisions,sibling_conflicts=conflicts)
+        'element_count':len(index),'sibling_conflicts':conflicts,'status':'conflicts_reported' if conflicts else 'validated_geometry',
+        'extent_policy':mode,'container_extent_decisions':extent_decisions}
+    trace_event('architect.hierarchy_layout.decisions',decisions=decisions,sibling_conflicts=conflicts,extent_decisions=extent_decisions)
     return result
