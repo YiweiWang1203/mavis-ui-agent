@@ -230,6 +230,12 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
             system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_node_evidence.md').read_text(encoding='utf-8')
     else:
         system_prompt = read_ui_architect_prompt()
+    semantic_mode=os.getenv('UI_SEMANTIC_TYPE_MODE','off')
+    if semantic_mode not in {'off','declare_spoken_input_v1','spoken_input_v1'}:
+        raise ValueError('Unsupported semantic type mode')
+    if semantic_mode!='off':
+        from pathlib import Path
+        system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/spoken_input_evidence.md').read_text(encoding='utf-8')
     user_content = f"""
 [User Intent]
 {user_intent}
@@ -286,6 +292,9 @@ Return the final fused UI-State JSON.
 
 @traced_stage('architect.finalize')
 def finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, preferred_locale=None):
+    if os.getenv('UI_SEMANTIC_TYPE_MODE','off')=='spoken_input_v1':
+        from src.utils.spoken_input_evidence import compile_spoken_inputs
+        ui_state=compile_spoken_inputs(ui_state,vision_elements,user_intent)
     if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
         from src.utils.hierarchy_contract import build_structure, solve_hierarchy
         if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
