@@ -30,7 +30,7 @@ def main():
     parser.add_argument('--state', type=Path)
     parser.add_argument('--worker-token')
     parser.add_argument('--case',type=Path)
-    parser.add_argument('--trial', choices=['source_alignment','hierarchy','placement','typed_controls','controlled','relations','partial_relations','container_registry','inline_registry','visual_context','node_evidence','relation_specialist','relation_slots','container_extent','relation_union','relation_regression','empty_slots','semantic_input','input_audit','input_requirements'], default='source_alignment')
+    parser.add_argument('--trial', choices=['source_alignment','hierarchy','placement','typed_controls','controlled','relations','partial_relations','container_registry','inline_registry','visual_context','node_evidence','relation_specialist','relation_slots','container_extent','relation_union','relation_regression','empty_slots','semantic_input','input_audit','input_requirements','global_spatial'], default='source_alignment')
     args = parser.parse_args()
     project = args.project.resolve()
     head = subprocess.check_output(['git','rev-parse','HEAD'], cwd=ROOT, text=True).strip()
@@ -45,7 +45,7 @@ def main():
     lock = cycles/'active_generation.lock'
     if not args.worker_token:
         token = uuid.uuid4().hex
-        round_id = {'hierarchy':'05','source_alignment':'04','placement':'06','typed_controls':'07','controlled':'08','relations':'09','partial_relations':'10','container_registry':'11','inline_registry':'12','visual_context':'13','node_evidence':'14','relation_specialist':'15','relation_slots':'16','container_extent':'17','relation_union':'18','relation_regression':'19','empty_slots':'20','semantic_input':'21','input_audit':'22','input_requirements':'23'}[args.trial]
+        round_id = {'hierarchy':'05','source_alignment':'04','placement':'06','typed_controls':'07','controlled':'08','relations':'09','partial_relations':'10','container_registry':'11','inline_registry':'12','visual_context':'13','node_evidence':'14','relation_specialist':'15','relation_slots':'16','container_extent':'17','relation_union':'18','relation_regression':'19','empty_slots':'20','semantic_input':'21','input_audit':'22','input_requirements':'23','global_spatial':'24'}[args.trial]
         state = cycles/('round'+round_id+'_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+token[:6])
         # Exclusive global reservation: never silently clear an existing lock.
         with lock.open('x', encoding='utf-8') as f:
@@ -54,8 +54,8 @@ def main():
             state.mkdir(exist_ok=False)
             record = {'round':round_id,'status':'launching','head':head,'checkout':str(ROOT),
                 'case':str(case),'result_root':str(state/'results'), 'token':token,
-                'command_budget':{'max_calls':{'controlled':5,'relations':4,'partial_relations':4,'container_registry':4,'inline_registry':4,'visual_context':4,'node_evidence':4,'relation_specialist':3,'relation_slots':3,'container_extent':3,'relation_union':3,'relation_regression':3,'empty_slots':3,'semantic_input':3,'input_audit':3,'input_requirements':3}.get(args.trial,6),'max_tokens_per_stage':8192,'timeout_seconds':600,'automatic_retries':0},
-                'goal':{'hierarchy':'Hierarchy and source contract','placement':'Compiled page-global placement contract','source_alignment':'Source identity correspondence','typed_controls':'Typed native component implementation','controlled':'Controlled component generation','relations':'Source-grounded containment ledger','partial_relations':'Isolate local relation source errors','container_registry':'Source-backed container registry and reference closure','inline_registry':'Compile source-backed containers from one node table','visual_context':'Retain original sketch image at architecture fusion','node_evidence':'Compile node-owned parent and source declarations','relation_specialist':'Shared fresh upstream and separate relation evidence stage','relation_slots':'Code-owned typed parent roles for source evidence extraction','container_extent':'Shared verified state container extent layout','relation_union':'Independently validated evidence source union','relation_regression':'Frozen evidence union small cross-development-case regression','empty_slots':'Skip relation extraction with no legal container role','semantic_input':'Source-backed semantic input type compilation','input_audit':'Complete per-text-node semantic evidence audit','input_requirements':'Code-owned source requirements bound to visual identities'}[args.trial]}
+                'command_budget':{'max_calls':{'controlled':5,'relations':4,'partial_relations':4,'container_registry':4,'inline_registry':4,'visual_context':4,'node_evidence':4,'relation_specialist':3,'relation_slots':3,'container_extent':3,'relation_union':3,'relation_regression':3,'empty_slots':3,'semantic_input':3,'input_audit':3,'input_requirements':3,'global_spatial':3}.get(args.trial,6),'max_tokens_per_stage':8192,'timeout_seconds':600,'automatic_retries':0},
+                'goal':{'hierarchy':'Hierarchy and source contract','placement':'Compiled page-global placement contract','source_alignment':'Source identity correspondence','typed_controls':'Typed native component implementation','controlled':'Controlled component generation','relations':'Source-grounded containment ledger','partial_relations':'Isolate local relation source errors','container_registry':'Source-backed container registry and reference closure','inline_registry':'Compile source-backed containers from one node table','visual_context':'Retain original sketch image at architecture fusion','node_evidence':'Compile node-owned parent and source declarations','relation_specialist':'Shared fresh upstream and separate relation evidence stage','relation_slots':'Code-owned typed parent roles for source evidence extraction','container_extent':'Shared verified state container extent layout','relation_union':'Independently validated evidence source union','relation_regression':'Frozen evidence union small cross-development-case regression','empty_slots':'Skip relation extraction with no legal container role','semantic_input':'Source-backed semantic input type compilation','input_audit':'Complete per-text-node semantic evidence audit','input_requirements':'Code-owned source requirements bound to visual identities','global_spatial':'Image page boundary and hierarchical region coordinate compilation'}[args.trial]}
             write(state/'run.json',record)
             with (state/'worker.log').open('ab', buffering=0) as log:
                 child = subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--project',str(project),
@@ -139,6 +139,9 @@ def main():
     if args.trial=='input_requirements':
         command = [sys.executable,'-u',str(ROOT/'scripts/run_input_audit_comparison.py'),
             '--case',str(case),'--output-root',str(state/'results'),'--audit-mode','requirement_slots_v1']
+    if args.trial=='global_spatial':
+        command = [sys.executable,'-u',str(ROOT/'scripts/run_input_audit_comparison.py'),
+            '--case',str(case),'--output-root',str(state/'results'),'--audit-mode','global_spatial_v1']
     record.update(status='running',worker_pid=os.getpid(),command=command)
     write(state/'run.json',record)
     environment = dict(os.environ, MAVIS_ENV_FILE=str(project/'.env'))

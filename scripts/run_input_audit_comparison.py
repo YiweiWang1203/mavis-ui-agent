@@ -54,7 +54,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case', required=True, type=Path)
     parser.add_argument('--output-root', required=True, type=Path)
-    parser.add_argument('--audit-mode', choices=['input_audit_v1', 'requirement_slots_v1'], default='input_audit_v1')
+    parser.add_argument('--audit-mode', choices=['input_audit_v1', 'requirement_slots_v1', 'global_spatial_v1'], default='input_audit_v1')
     args = parser.parse_args()
     inputs = load_inputs(args.case.resolve(), 'M2')
     provenance = source_record()
@@ -86,7 +86,7 @@ def main():
     from openai import OpenAI
     gate = CappedProvider(OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600))
     client = BudgetClient(gate, shared)
-    arm_name = 'input_requirement_slots' if args.audit_mode == 'requirement_slots_v1' else 'input_audit'
+    arm_name = {'requirement_slots_v1':'input_requirement_slots','global_spatial_v1':'global_spatial_v1'}.get(args.audit_mode,'input_audit')
     manifest = dict(provenance, status='started', specialist_mode=args.audit_mode, call_limit=3, shared_calls=2,
         effective_calls={'baseline': 2, arm_name: 3},
         budget_note='shared new vision+architect; candidate adds one declared evidence audit; not equal-call arms; relation specialist off in both',
@@ -124,7 +124,11 @@ def main():
         from src.renderers.controlled_components import render_controlled_components
         intent = inputs['prompt'] + '\n\n[Spoken transcript]\n' + inputs['transcript']
         with PipelineTrace(candidate_folder / 'pipeline_trace', {'entrypoint': 'fresh_shared_upstream_input_audit', 'preprocessing': 'not_executed_frozen_assets'}):
-            if args.audit_mode == 'requirement_slots_v1':
+            if args.audit_mode == 'global_spatial_v1':
+                from src.agents.global_spatial_planner import plan_global_spatial
+                candidate_state = plan_global_spatial(baseline_state, intent, shared/'effective_image.jpg', model, candidate_client)
+                proposal = raw
+            elif args.audit_mode == 'requirement_slots_v1':
                 from src.agents.input_requirement_binder import bind_input_requirements
                 proposal = bind_input_requirements(copy.deepcopy(raw), vision, intent, model, candidate_client)
             else:
@@ -134,15 +138,17 @@ def main():
             write_json(candidate_folder / 'specialist_proposal.json', proposal)
             write_json(candidate_folder / 'shared_raw_node_sha256.json', {'raw_nodes': __import__('hashlib').sha256(json.dumps(raw['elements'],sort_keys=True,ensure_ascii=False).encode()).hexdigest()})
             os.environ['UI_SEMANTIC_TYPE_MODE']='spoken_input_v1'
-            candidate_state = finalize_ui_state(proposal, intent, vision, 'hierarchy_registry_image_v1')
+            if args.audit_mode != 'global_spatial_v1':
+                candidate_state = finalize_ui_state(proposal, intent, vision, 'hierarchy_registry_image_v1')
             candidate_code = render_controlled_components(candidate_state)
     except Exception as error:
         candidate_state = {'error': type(error).__name__}
-        write_json(candidate_folder / 'failure.json', {'error_type': type(error).__name__})
+        write_json(candidate_folder / 'failure.json', {'error_type': type(error).__name__, 'reason': str(error)})
     candidate = persist_arm(candidate_folder, candidate_state, candidate_code,
         dict(common, arm=arm_name, audit_mode=args.audit_mode, generation_kind='fresh_shared_upstream_input_audit', source_nodes_edited_by_specialist=False, extra_elapsed_seconds=time.monotonic()-candidate_start), candidate_client.calls)
     candidate.update(generation_kind='fresh_shared_upstream_input_audit',
-        source_nodes_edited_by_specialist=False, semantic_type_compilation_enabled=True)
+        source_nodes_edited_by_specialist=False, semantic_type_compilation_enabled=args.audit_mode != 'global_spatial_v1',
+        spatial_reobservation_enabled=args.audit_mode == 'global_spatial_v1')
     write_json(candidate_folder / 'run_summary.json', candidate)
     manifest['runs'].append({'folder': str(candidate_folder), 'status': candidate['status']})
     manifest.update(actual_total_calls=gate.count, shared_actual_calls=len(client.calls), candidate_additional_calls=len(candidate_client.calls),
