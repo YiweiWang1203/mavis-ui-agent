@@ -28,7 +28,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--case', type=Path, required=True)
     parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1'), default='semantic-page-v1')
+    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1'), default='semantic-page-v1')
     args = parser.parse_args()
     inputs = load_inputs(args.case.resolve(), 'M2')
     state_dir = args.state.resolve()
@@ -75,7 +75,7 @@ def main():
         'max_tokens_per_stage': 8192, 'timeout_seconds': 600, 'max_retries': 0,
         'baseline_status': 'not_generated', 'candidate_status': 'not_generated',
         'device_request_added_equally': True, 'output_html_repair': False, 'behavior_evaluated': False}
-    if args.candidate_mode == 'frozen-regions-v1':
+    if args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1'}:
         manifest['call_accounting'] = {'physical_cap': 3, 'shared_vision_and_architecture': 2,
             'baseline_exclusive': 0, 'candidate_exclusive': 1, 'baseline_effective': 2, 'candidate_effective': 3}
     write_json(batch / 'batch.json', manifest)
@@ -109,13 +109,17 @@ def main():
         manifest['shared_vision_sha256'] = sha256(vision_path)
         manifest['same_image_url_sha256'] = image_hash
         planned.stage = args.candidate_mode
-        if args.candidate_mode == 'frozen-regions-v1':
+        if args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1'}:
             from src.agents.frozen_region_planner import generate_frozen_region_plan, frozen_inventory, inventory_hash
             if not (baseline / 'ui_state.json').is_file():
                 raise ValueError('Fresh baseline semantic inventory required; no historical fallback')
             baseline_state = json.loads((baseline / 'ui_state.json').read_text(encoding='utf-8'))
             manifest['immutable_inventory_sha256'] = inventory_hash(frozen_inventory(baseline_state))
-            state = generate_frozen_region_plan(baseline_state, vision, request=inputs['prompt'], speech=inputs['transcript'],
+            planner = generate_frozen_region_plan
+            if args.candidate_mode == 'symbolic-flow-v1':
+                from src.agents.symbolic_flow_planner import generate_symbolic_flow
+                planner = generate_symbolic_flow
+            state = planner(baseline_state, vision, request=inputs['prompt'], speech=inputs['transcript'],
                 frame=frame, viewport=viewport, image_data_url=image_url, client=planned, model=model, output=candidate)
             manifest['call_accounting'] = {'physical_cap': 3, 'shared_vision_and_architecture': 2,
                 'baseline_exclusive': 0, 'candidate_exclusive': 1, 'baseline_effective': 2, 'candidate_effective': 3}
@@ -139,7 +143,7 @@ def main():
         request_elapsed_seconds=sum(c['elapsed_seconds'] for c in calls),
         finished_utc=datetime.now(timezone.utc).isoformat(),
         runs=[{'folder': str(baseline)}, {'folder': str(candidate)}])
-    frozen = args.candidate_mode == 'frozen-regions-v1'
+    frozen = args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1'}
     shared_count = len(upstream.calls) if frozen else min(1, len(upstream.calls))
     for folder, arm, exclusive in [(baseline, 'baseline', 0 if frozen else max(0, len(upstream.calls) - 1)), (candidate, 'candidate', len(planned.calls))]:
         write_json(folder / 'run_summary.json', {'status': manifest[arm + '_status'],
