@@ -10,3 +10,7 @@
 主验收：按全部原生button固定分母，分别报告原来过高(>48px)与处理后数量，处理触发数/可处理数；浏览器按钮真实尺寸符合声明且无新增标题裁切，至少一原过高按钮变小，截图确有可见改善方可称局部收益。不能以工程阈值达标替代页面合理比例，保留空白增多/控件锚点或视觉组织退化的手审。退化：全部ID/文字/类型/动作/父关系不变、区域树/分配不变、按钮只在自己原区内、非button坐标不变、无新增越界/遮挡，主输入固定1与七操作任务不下降。标签提示仅点击确认，非真实发送或业务成功。无原过高按钮记未触发；页面整体完整度/层级正确不能因小按钮改进称达标。
 5. 实施验证：先工程检查，保存源码版本和两个原始新分支；通过后同次启动Ubuntu独立检出原UV有界生成。结果待下次验收。
 6. 下一步：若仅缩小但组织更散/文字裁切/操作下降则拒绝默认启用，不调字号阈值反复救；若确有局部收益仍须分开处理缺失消息、个人入口与区域比例，不能默认推广13开发例。仅002开发、同实施者非独立人工，冻结论文指标不变。
+
+## 实施与启动回执
+
+本机83/Ubuntu原UV83工程检查、Python/JS语法通过，工程检查不代表收益。代码7239730f8742d0b3393f99da16b76149edcf94e5已推送，完整verified bundle独立检出/wyw/meeting_agent_workspace/my_agent_button_footprints_7239730；原UV3.12.13，无安装、三输入哈希不变。PID147017，UTC23:39:30实际run.json确认running、物理cap2；状态/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round58_20261028T233930Z_button_footprints；批次/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round58_20261028T233930Z_button_footprints/results/20261028T233930Z_49552e70；预期ZIP /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round58_20261028T233930Z_button_footprints/results.zip，日志/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round58_20261028T233930Z_button_footprints.worker.log。当前/设计/窗口/闭环与57终态均已写回；不在本次重复验收或启动58。
