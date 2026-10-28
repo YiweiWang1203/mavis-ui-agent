@@ -277,6 +277,15 @@ Return the final fused UI-State JSON.
         ui_state = json.loads(raw_json_str)
         trace_event('architect.model_parsed',output=ui_state)
         specialist_mode = os.getenv('UI_RELATION_SPECIALIST_MODE', 'off')
+        input_audit_mode = os.getenv('UI_INPUT_SEMANTIC_AUDIT_MODE', 'off')
+        if input_audit_mode not in {'off', 'input_audit_v1'}:
+            raise ValueError('Unsupported input audit mode')
+        if input_audit_mode == 'input_audit_v1':
+            if specialist_mode != 'off' or semantic_mode != 'spoken_input_v1':
+                raise ValueError('Input audit requires input compiler and no additional relation specialist')
+            from src.agents.input_semantic_auditor import audit_input_semantics
+            ui_state = audit_input_semantics(ui_state, vision_elements, user_intent,
+                                            planner_model, _get_openai_client())
         if specialist_mode in {'source_ledger_v1', 'container_slots_v1', 'container_slots_guard_v1'}:
             from src.agents.relation_specialist import refine_relation_state
             ui_state = refine_relation_state(ui_state, user_intent, planner_model, _get_openai_client(), mode=specialist_mode)
