@@ -43,7 +43,8 @@ def _outside(a, b):
             (b[0] < a[0], b[1] < a[1], b[2] > a[2], b[3] > a[3])) if invalid]
 
 
-def compile_region_structure(ui_state, vision_elements, *, frame, viewport, region_plan):
+def compile_region_structure(ui_state, vision_elements, *, frame, viewport, region_plan,
+                             text_sources=None, text_evidence=None):
     """Return an opt-in structure and audit, preserving all semantic decisions.
 
     This compiles declared proportions, not their semantic correctness. Plans
@@ -63,6 +64,8 @@ def compile_region_structure(ui_state, vision_elements, *, frame, viewport, regi
         raise ValueError('Region prototype size limit exceeded')
     allowed = {'vision:' + v['id'] for v in vision_elements['elements']}
     allowed |= {'spoken_intent:' + e['id'] for e in ui_state['elements'] if e.get('origin') == 'spoken'}
+    from src.utils.text_evidence_contract import validate_text_evidence
+    allowed |= validate_text_evidence(text_sources or {}, text_evidence or [])
     regions = {}
     for record in records:
         if not isinstance(record, dict):
@@ -126,7 +129,9 @@ def compile_region_structure(ui_state, vision_elements, *, frame, viewport, regi
                            'evidence_refs': refs, 'region_path': paths[rid], 'local_bbox': local,
                            'method': 'nested_region_affine_v1'}})
     contract = {'version': 'evidence-layout-v1', 'frame': copy.deepcopy(frame),
-                'viewport': copy.deepcopy(viewport), 'placements': compiled}
+                'viewport': copy.deepcopy(viewport), 'placements': compiled,
+                'text_sources': copy.deepcopy(text_sources or {}),
+                'text_evidence': copy.deepcopy(text_evidence or [])}
     # Identity validation and exact inventory coverage are still authoritative.
     structure = build_structure(ui_state, vision_elements, coordinate_contract=contract)
     conflicts = []

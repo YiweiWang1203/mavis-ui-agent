@@ -68,6 +68,8 @@ def apply_coordinate_contract(state, vision_elements, contract):
     vision = {v['id']: v for v in vision_elements['elements']}
     valid_refs = {'vision:' + vid for vid in vision}
     valid_refs |= {'spoken_intent:' + e['id'] for e in state['elements'] if e.get('origin') == 'spoken'}
+    from src.utils.text_evidence_contract import validate_text_evidence
+    valid_refs |= validate_text_evidence(contract.get('text_sources', {}), contract.get('text_evidence', []))
     result = copy.deepcopy(state)
     for entity in result['elements']:
         placement = by_id[entity['id']]
@@ -103,5 +105,6 @@ def apply_coordinate_contract(state, vision_elements, contract):
         'observation_count': sum(len(e['observation_geometry']) for e in result['elements']),
         'status': 'engineering_contract_validated_semantics_not_evaluated',
         'implicit_photo_to_viewport_mapping': False,
+        'text_evidence': copy.deepcopy(contract.get('text_evidence', [])),
     }
     return result
