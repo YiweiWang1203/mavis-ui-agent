@@ -1,6 +1,7 @@
 """Bounded geometric proposals; closure does not establish UI-page identity."""
 import itertools
 import math
+from collections import Counter
 from src.utils.page_line_boundary import compile_boundary
 
 
@@ -14,7 +15,7 @@ def side_overlap(segment, a, b):
     return max(0, min(1, max(ts))-max(0, min(ts)))
 
 
-def closed_candidates(lines, width, height, limit=16):
+def closed_candidates(lines, width, height, limit=16, fragment_mode=False):
     if len(lines) > 48 or limit > 16 or limit < 1:
         raise ValueError('Bounded proposal budget exceeded')
     horizontal = [r for r in lines if r['orientation']=='horizontal']
@@ -26,6 +27,7 @@ def closed_candidates(lines, width, height, limit=16):
         raise ValueError('Duplicate source line IDs')
     valid = []
     rejected = 0
+    rejection_reasons=Counter()
     for hs, vs in itertools.product(itertools.combinations(horizontal, 2),
                                      itertools.combinations(vertical, 2)):
         top, bottom = sorted(hs,key=lambda r:(r['endpoints'][1]+r['endpoints'][3])/2)
@@ -34,15 +36,23 @@ def closed_candidates(lines, width, height, limit=16):
         try:
             result = compile_boundary(lines,dict(side_ids=ids,unresolved_reason=None),width,height)
             q = result['quad']
-            coverage = {role:side_overlap(index[ids[role]]['endpoints'],q[i],q[(i+1)%4])
-                        for i,role in enumerate(['top','right','bottom','left'])}
+            result['side_ids']=ids
+            if fragment_mode:
+                from src.utils.fragment_boundary import validate_fragment_sides
+                details=validate_fragment_sides(lines,result,width,height)
+                result['observed_support_details']=details
+                coverage={role:d['fraction'] for role,d in details.items()}
+            else:
+                coverage = {role:side_overlap(index[ids[role]]['endpoints'],q[i],q[(i+1)%4])
+                            for i,role in enumerate(['top','right','bottom','left'])}
             if min(coverage.values()) < .60:
                 raise ValueError('Projected support below 60 percent on a side')
             result.update(side_ids=ids,projected_support=coverage,
                           ranking_score=result['area_fraction']*min(coverage.values()))
             valid.append(result)
-        except ValueError:
+        except ValueError as error:
             rejected += 1
+            rejection_reasons[str(error)]+=1
     unique = []
     for r in sorted(valid,key=lambda r:-r['ranking_score']):
         # Suppress near-identical double-stroke proposals, not nested UI regions.
@@ -55,6 +65,7 @@ def closed_candidates(lines, width, height, limit=16):
         r['id']='page_candidate_'+str(i+1)
     return dict(candidates=selected,valid_combinations=len(valid),
                 unique_before_cap=len(unique),rejected_combinations=rejected,
+                rejection_reasons=dict(rejection_reasons),
                 candidate_cap=limit,limits='Geometry only; ranking is not semantic correctness.')
 
 
