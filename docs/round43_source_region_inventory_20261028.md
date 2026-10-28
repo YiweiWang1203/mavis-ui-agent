@@ -1,6 +1,6 @@
 # 轮43：原文区域清单与逐槽图像定位
 
-状态：实施前固定方案；窗口43—52的第一次真实试验，尚未启动。执行协议见optimization_window_43_52.md。
+状态：已启动，窗口43—52的第一次真实试验；结果待验收。执行协议见optimization_window_43_52.md。
 
 ## 导师技能审查
 
@@ -27,5 +27,5 @@
 
 研究回看：复读链路诊断与Agent架构调研及手绘页面定位与空间理解_学术路线复核的区域部分。MM-WebAgent支持全局与局部职责划分；Magic Layouts提示UI结构先验价值但不是本机制复现；Sketch2Code提醒理解仍会失败。这里是任务化来源契约与职责拆分，不声称论文中的架构/模型被复现，也不主张已有创新性结论。
 
-5. 实施验证：待代码/测试/提交/独立UV启动；原包、内部产物哈希和区域叠图手审后补实测。
+5. 实施验证：生成提交68c5778edfa165a5b72cd8983791c67b2ec9c0e7已推送；本机13/Ubuntu13项工程检查通过，非效果。独立检出/wyw/meeting_agent_workspace/my_agent_source_region_slots_v1，原UV Python3.12.13。2026-10-28 12:49:36 UTC启动，PID129857；状态目录/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round43_20261028T124936Z，worker.log/full_frame.log；实际批次results/full_frame/20261028T124937Z_ad8fa162；预期原包状态目录下results.zip。运行中不得修改检出/重复启动。原包、内部产物哈希和区域叠图手审后补实测。完整启动与验收目标另存current_remote.json、window_progress.json。
 6. 下一轮决定：若区域完整性改善，保留可选探针并接真实页面层级验证；若原文清单漏项先查语义解析，若清单正确定位错查视觉绑定，若两者正确页面仍混乱查画布/区域布局。不得再回到无界补框或重复采样挑优。
