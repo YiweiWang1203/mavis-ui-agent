@@ -27,13 +27,13 @@ def main():
     from openai import OpenAI
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',type=Path,required=True);parser.add_argument('--output-root',type=Path,required=True)
-    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment','chain_identity'],default='fragments')
+    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment','chain_identity','chain_regression'],default='fragments')
     args=parser.parse_args();inputs=load_inputs(args.case.resolve(),'M2')
     batch=args.output_root.resolve()/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8])
     batch.mkdir(parents=True)
     image_path=batch/'image.jpg';shutil.copyfile(inputs['image'],image_path)
     image=cv2.imread(str(image_path));h,w=image.shape[:2]
-    if args.comparison in {'retention','identity','recruitment','chain_identity'}:
+    if args.comparison in {'retention','identity','recruitment','chain_identity','chain_regression'}:
         from unittest.mock import patch
         raw=cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD).detect(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY))[0]
         write_json(batch/'raw_lines.json',[] if raw is None else raw.tolist())
@@ -42,7 +42,7 @@ def main():
         with patch.object(cv2,'createLineSegmentDetector',return_value=FrozenDetector()):
             lines=detect_line_candidates(image)
             spatial=detect_line_candidates(image,selection='spatial_v1')
-        if any(sum(r['orientation']==o for r in lines)!=sum(r['orientation']==o for r in spatial)
+        if args.comparison=='retention' and any(sum(r['orientation']==o for r in lines)!=sum(r['orientation']==o for r in spatial)
                for o in ['horizontal','vertical']):
             raise ValueError('Retention comparison requires equal actual orientation counts')
         arms={}
@@ -67,7 +67,7 @@ def main():
             write_json(batch/'recruited_support.json',recruited)
             arms={'existing_support':arms['spatial_retention_v1'],
                   'endpoint_recruitment_v1':closed_candidates(recruited['lines'],w,h,fragment_mode=True)}
-        if args.comparison=='chain_identity':
+        if args.comparison in {'chain_identity','chain_regression'}:
             from src.utils.bounded_fragment_chains import recruit_fragment_chains
             from src.utils.candidate_containment_context import shared_candidate_order,containment_context
             base_support=aggregate_fragments(spatial,w,h)
@@ -80,6 +80,7 @@ def main():
             write_json(batch/'candidate_id_mapping.json',mapping)
             write_json(batch/'containment_context.json',containment_context(shared))
             arms={'free_page_selection':shared,'containment_context_v1':shared}
+            if args.comparison=='chain_regression':arms={'free_page_selection':shared}
     else:
         lines=detect_line_candidates(image)
         support=aggregate_fragments(lines,w,h);write_json(batch/'fragment_support.json',support)
@@ -109,12 +110,13 @@ def main():
     url=urlsplit(endpoint or '')
     if not key or url.scheme!='https' or not url.netloc or url.username or url.password or url.query or url.fragment:
         raise ValueError('Existing credential-free HTTPS endpoint required')
-    provider=CappedProvider(OpenAI(api_key=key,base_url=endpoint,max_retries=0,timeout=600),limit=2)
+    call_limit=1 if args.comparison=='chain_regression' else 2
+    provider=CappedProvider(OpenAI(api_key=key,base_url=endpoint,max_retries=0,timeout=600),limit=call_limit)
     model='Qwen/Qwen3-VL-8B-Instruct';provenance=source_record()
     intent=inputs['prompt']+'\n'+inputs['transcript']
     def image_part(path):return {'type':'image_url','image_url':{'url':'data:image/jpeg;base64,'+base64.b64encode(path.read_bytes()).decode('ascii')}}
     manifest=dict(provenance,status='started',generation_kind='fresh_boundary_only_comparison',runs=[],
-        input_sha256={k:sha256(v) for k,v in inputs['files'].items()},comparison=args.comparison,max_calls=2,model=model,empty_candidate_precondition='Skip equally for both groups; no semantic score when no candidates',
+        input_sha256={k:sha256(v) for k,v in inputs['files'].items()},comparison=args.comparison,max_calls=call_limit,model=model,empty_candidate_precondition='Skip call for empty candidates; no semantic score when no candidates',
         runtime={'python_executable':sys.executable,'python_version':sys.version,'cv2_path':cv2.__file__,'numpy_path':np.__file__},
         max_tokens_per_stage=8192,timeout_seconds=600,max_retries=0,
         limits='Boundary localization only; no HTML, task functionality or whole-layout improvement scores.')
@@ -169,9 +171,10 @@ def main():
                 cv2.polylines(preview,[np.round(quad).astype(np.int32)],True,(0,0,255),2)
                 cv2.imwrite(str(out/'boundary_overlay.jpg'),preview)
                 # Diagnostic page mapping, not a generated UI or perspective-accuracy assertion.
-                dst=np.array([[0,0],[1439,0],[1439,899],[0,899]],dtype=np.float32)
-                mapped=cv2.warpPerspective(image,cv2.getPerspectiveTransform(quad,dst),(1440,900))
-                cv2.imwrite(str(out/'mapped_page_1440x900.jpg'),mapped)
+                if args.comparison!='chain_regression':
+                    dst=np.array([[0,0],[1439,0],[1439,899],[0,899]],dtype=np.float32)
+                    mapped=cv2.warpPerspective(image,cv2.getPerspectiveTransform(quad,dst),(1440,900))
+                    cv2.imwrite(str(out/'mapped_page_1440x900.jpg'),mapped)
         except Exception as error:
             write_json(out/'failure.json',{'error_type':type(error).__name__,'reason':str(error)})
         summary.update(call_count=len(client.calls),usage=[c.get('response',{}).get('usage') for c in client.calls],
