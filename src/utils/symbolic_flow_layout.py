@@ -6,6 +6,58 @@ from src.agents.frozen_region_planner import compile_frozen_regions, frozen_inve
 from src.utils.text_evidence_contract import source_spans
 
 
+def expand_flat_program(program):
+    """Validate references and construct the tree; never fill missing leaves."""
+    if not isinstance(program, dict) or set(program) != {'version', 'nodes'} or program['version'] != 'symbolic-flat-v1':
+        raise ValueError('Expected symbolic-flat-v1 nodes only')
+    rows = program['nodes']
+    if not isinstance(rows, list) or not rows or len(rows) > 1024:
+        raise ValueError('Invalid flat node count')
+    nodes, children = {}, {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError('Invalid flat node')
+        common = {'id', 'kind', 'parent_id', 'weight', 'evidence_refs', 'reason'}
+        expected = common | ({'axis'} if row.get('kind') == 'split' else {'entity_id'})
+        if set(row) != expected or row.get('kind') not in {'split', 'entity'}:
+            raise ValueError('Invalid flat fields; coordinates not allowed')
+        rid, parent, weight = row['id'], row['parent_id'], row['weight']
+        if not isinstance(rid, str) or not rid or rid in nodes or (parent is not None and (not isinstance(parent, str) or not parent)):
+            raise ValueError('Invalid flat node identity')
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight) or not 0 <= weight <= 1000000:
+            raise ValueError('Invalid flat weight')
+        nodes[rid] = row
+        children.setdefault(parent, []).append(rid)
+    roots = children.get(None, [])
+    if len(roots) != 1:
+        raise ValueError('Exactly one flat root required')
+    for rid, row in nodes.items():
+        parent = row['parent_id']
+        if parent is not None and (parent not in nodes or nodes[parent]['kind'] != 'split'):
+            raise ValueError('Unknown or non-group flat parent')
+        if row['kind'] == 'entity' and rid in children:
+            raise ValueError('Entity cannot own flat nodes')
+    seen = set()
+    def build(rid, depth=0):
+        if rid in seen or depth > 32:
+            raise ValueError('Flat cycle or depth exceeded')
+        seen.add(rid)
+        row = nodes[rid]
+        item = {k: copy.deepcopy(row[k]) for k in ['kind', 'evidence_refs', 'reason']}
+        if row['kind'] == 'entity':
+            item['entity_id'] = row['entity_id']
+        else:
+            kids = children.get(rid, [])
+            if not kids:
+                raise ValueError('Empty flat group')
+            item.update(id=rid, axis=row['axis'], weights=[nodes[k]['weight'] for k in kids], children=[build(k, depth + 1) for k in kids])
+        return item
+    root = build(roots[0])
+    if seen != set(nodes):
+        raise ValueError('Unreachable flat nodes or disconnected cycle')
+    return {'version': 'symbolic-flow-v1', 'root': root}
+
+
 def compile_symbolic_flow(tree, state, vision, *, request, speech, frame, viewport):
     if not isinstance(tree, dict) or set(tree) != {'version', 'root'} or tree['version'] != 'symbolic-flow-v1':
         raise ValueError('Expected symbolic-flow-v1 with root only')
