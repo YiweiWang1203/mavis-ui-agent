@@ -24,3 +24,17 @@
 生成提交51bcae0f227742d439b44a3199f759fb68426077已推送；Git bundle经Ubuntu验证再同步至独立检出 `/wyw/meeting_agent_workspace/my_agent_parent_geometry_v1`。本机28项工程检查通过，Ubuntu同28项及2项图像来源测试通过，未安装依赖。本机首次额外来源路径测试因系统临时目录权限失败，改用工作区临时目录后通过；初始“交叉区域”测试夹具实际为嵌套框，已在启动前纠正夹具，不改算法规则。旧48状态诊断重编译只验证基线一致性，不计新生成效果。
 
 2026-10-29 01:21:45（北京时间）启动PID138067。原UV解释器 `/wyw/meeting_agent_workspace/my_agent/.venv/bin/python`。状态目录 `/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round49_20261028T172145Z`，日志full_frame.log/worker.log；实际批次 `results/full_frame/20261028T172146Z_1a20ecfe`，预期原包为该状态目录的results.zip。本轮两次共享物理调用上限，不开第三规划调用；8192/600秒/零重试。完整旋转图SHA340bfd115af912a98a074bc77a8eb00248e8d9e8d47578a0af79b800a495c7c6，口述SHAf2a296756bdebe242cad8676f3a7851e42708779d73597f8770175cf76ac2aff。启动时状态running，真实效果待验收，不等于工程检查通过即有效。PID/路径/输入/版本已持久写current_remote和window_progress；窗口已启动7/10、验收6/10。
+
+## 实际验收：机制未触发，无新增收益
+
+2026-10-29 01:22:22（北京时间）结束，SSH终态与归档核对。原ZIP SHA256 `662ad71636d6d529e3ec05c7396f249a6864137872adcfde22e01c0ba079206a`，99次内部/来源哈希引用全部通过。本地 `outputs/optimization/round49_parent_geometry` 保存原包、源恢复记录、browser/audit.json、两截图、hit_test.json与详细audit.json。所有原产物不改。
+
+本轮新上游仅9对象，原始架构响应已全部parent_id=null，既有合法容器只有历史list，未声明页面/左栏/右栏/编辑区结构。不是后处理删父关系。guard得到conflicts=0/accepted=0/unresolved=0、decisions=[]；0/0不代表关系覆盖。共享实时pre-layout SHA256 `ee3aa6043f545abee25c5b186b3d43d532d0b49155bb86a6a9028464765aba36`，guard前后elements完全相等。两组HTML逐字节相同SHA256 `33ec8a8647fac2c31fbde8d90fd6087a6e61a41aa748ae03daf2f98dced2a48c`，不能称本机制改善视觉、操作或重复，也不能因尚未触发而断言机制被数据否定。禁止再跑一次挑触发样本。
+
+实际浏览器两组均PC1440×900、原生主输入填入读回1/1；固定七任务相关标签反馈5/7（返回、历史、附件、语音、发送），搜索点击超时，个人入口无反馈。标签相关提示只证明局部交互绑定，不是历史列表/上传/语音完整业务语义通过。个人头像为image，虽架构action写open_profile_settings，原生元素并无个人入口反馈。搜索按钮e2中心(360,112.5)实际被对话text对象e5命中覆盖；这是页面内跨区域遮挡，0越界并不能证明布局正确。两组9/9最终尺寸吻合、ID唯一、0越界/JS错误，输入与点击结果相同，HTML操作前后哈希不变。截图确认双方头像/消息内容不足，平铺对象不能当三主区域内容/归属通过。
+
+源链路限制：架构原拟定搜索[150,15,300,60]、对话内容[300,15,1440,720]，身份契约保留视觉坐标后分别成为[288,90,432,135]、[360,90,1368,630]，产生重叠；由于parent均空，本轮父冲突机制不作用。此处显示坐标与区域语义冲突不总以非空错误parent出现；需要重新审视区域证据职责，而非只等合法父树出现。不能直接选择架构坐标替换就宣称更准确；那是尚待设计的独立机制。
+
+成本：两次共享物理请求，视觉1980token/11.758065秒，架构2848token/22.642137秒，共4828token/34.400202秒；各组有效2次、独占0，不累计成4。原UV3.12.13/cv2/NumPy确认。两请求正常返回、零API失败/截断/重试，零深网/安装。没有额外模型调用或修HTML。
+
+导师决策：使用HKUSTDial/Supervisor-Skills idea-evaluator关于“未测与已否定”的边界和tech-paper-template一致性审查。guard可选保留作未验证工程假设，不推广为收益；本例未触发不算更高成功率，不用0/0冒充覆盖，不通过重复采样或改包含阈值挽救。下一轮必须重新定位源对象语义、区域声明与几何冲突，确定一个用户价值目标后再复读研究/先卡后实施，不继续单纯槽位/边框循环。窗口完成7/10，明显提升目标仍未达，剩余3轮，不扩窗。单例开发、同实施者非独立人工、无GT/ASR重跑/新选帧/旧HTML修补/论文评分修改。current_remote、round49_final_remote、window_progress已更新，本次不重复启动。
