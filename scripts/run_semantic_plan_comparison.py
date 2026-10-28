@@ -28,6 +28,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--case', type=Path, required=True)
     parser.add_argument('--state', type=Path, required=True)
+    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1'), default='semantic-page-v1')
     args = parser.parse_args()
     inputs = load_inputs(args.case.resolve(), 'M2')
     state_dir = args.state.resolve()
@@ -49,7 +50,7 @@ def main():
         'actual_batch': str(batch), 'python_executable': sys.executable,
         'expected_archive': str(state_dir / 'results.zip'), 'physical_call_cap': 3,
         'input_sha256': {k: sha256(v) for k, v in inputs['files'].items()},
-        'engineering_only': False, 'behavior_evaluated': False}
+        'candidate_mode': args.candidate_mode, 'engineering_only': False, 'behavior_evaluated': False}
     write_json(state_dir / 'run.json', record)
     print(json.dumps(record), flush=True)
     load_dotenv(os.getenv('MAVIS_ENV_FILE') or ROOT / '.env', override=True)
@@ -67,13 +68,16 @@ def main():
         LAYOUT_SOLVER_ENABLED='1')
     provider = CappedProvider(OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600), limit=3)
     upstream, planned = BudgetClient(provider, shared), BudgetClient(provider, candidate)
-    manifest = {**source_record(), 'status': 'started', 'model': model,
+    manifest = {**source_record(), 'status': 'started', 'model': model, 'candidate_mode': args.candidate_mode,
         'input_sha256': record['input_sha256'], 'runtime': {'python': sys.executable, 'version': sys.version},
         'call_accounting': {'physical_cap': 3, 'shared_vision': 1, 'baseline_exclusive': 1,
                             'candidate_exclusive': 1, 'effective_each': 2},
         'max_tokens_per_stage': 8192, 'timeout_seconds': 600, 'max_retries': 0,
         'baseline_status': 'not_generated', 'candidate_status': 'not_generated',
         'device_request_added_equally': True, 'output_html_repair': False, 'behavior_evaluated': False}
+    if args.candidate_mode == 'frozen-regions-v1':
+        manifest['call_accounting'] = {'physical_cap': 3, 'shared_vision_and_architecture': 2,
+            'baseline_exclusive': 0, 'candidate_exclusive': 1, 'baseline_effective': 2, 'candidate_effective': 3}
     write_json(batch / 'batch.json', manifest)
     try:
         try:
@@ -104,14 +108,25 @@ def main():
         viewport = {'id': 'desktop_target_v1', 'width': 1440, 'height': 900}
         manifest['shared_vision_sha256'] = sha256(vision_path)
         manifest['same_image_url_sha256'] = image_hash
-        planned.stage = 'semantic_page_plan'
-        state = generate_semantic_page_plan(vision, request=inputs['prompt'], speech=inputs['transcript'],
-            frame=frame, viewport=viewport, image_data_url=image_url, client=planned, model=model, output=candidate)
+        planned.stage = args.candidate_mode
+        if args.candidate_mode == 'frozen-regions-v1':
+            from src.agents.frozen_region_planner import generate_frozen_region_plan, frozen_inventory, inventory_hash
+            if not (baseline / 'ui_state.json').is_file():
+                raise ValueError('Fresh baseline semantic inventory required; no historical fallback')
+            baseline_state = json.loads((baseline / 'ui_state.json').read_text(encoding='utf-8'))
+            manifest['immutable_inventory_sha256'] = inventory_hash(frozen_inventory(baseline_state))
+            state = generate_frozen_region_plan(baseline_state, vision, request=inputs['prompt'], speech=inputs['transcript'],
+                frame=frame, viewport=viewport, image_data_url=image_url, client=planned, model=model, output=candidate)
+            manifest['call_accounting'] = {'physical_cap': 3, 'shared_vision_and_architecture': 2,
+                'baseline_exclusive': 0, 'candidate_exclusive': 1, 'baseline_effective': 2, 'candidate_effective': 3}
+        else:
+            state = generate_semantic_page_plan(vision, request=inputs['prompt'], speech=inputs['transcript'],
+                frame=frame, viewport=viewport, image_data_url=image_url, client=planned, model=model, output=candidate)
         if len(planned.calls) != 1:
             raise ValueError('Exactly one new semantic planning call required')
         (candidate / 'final_code.html').write_text(render_controlled_components(state), encoding='utf-8')
         manifest['candidate_status'] = 'html_generated_pending_semantic_and_browser_review'
-        manifest['semantic_plan_status'] = state['page_meta']['semantic_plan']['status']
+        manifest['semantic_plan_status'] = state['page_meta'].get('semantic_plan', state['page_meta'].get('frozen_inventory_layout', {}))['status']
         manifest['region_layout_status'] = state['page_meta']['region_layout']['status']
     except Exception as exc:
         manifest['candidate_status'] = 'validation_or_generation_failed'
@@ -124,10 +139,12 @@ def main():
         request_elapsed_seconds=sum(c['elapsed_seconds'] for c in calls),
         finished_utc=datetime.now(timezone.utc).isoformat(),
         runs=[{'folder': str(baseline)}, {'folder': str(candidate)}])
-    for folder, arm, exclusive in [(baseline, 'baseline', max(0, len(upstream.calls) - 1)), (candidate, 'candidate', len(planned.calls))]:
+    frozen = args.candidate_mode == 'frozen-regions-v1'
+    shared_count = len(upstream.calls) if frozen else min(1, len(upstream.calls))
+    for folder, arm, exclusive in [(baseline, 'baseline', 0 if frozen else max(0, len(upstream.calls) - 1)), (candidate, 'candidate', len(planned.calls))]:
         write_json(folder / 'run_summary.json', {'status': manifest[arm + '_status'],
-            'shared_vision_sha256': manifest.get('shared_vision_sha256'), 'shared_call_count': min(1, len(upstream.calls)),
-            'exclusive_call_count': exclusive, 'effective_calls': min(1, len(upstream.calls)) + exclusive,
+            'shared_vision_sha256': manifest.get('shared_vision_sha256'), 'shared_call_count': shared_count,
+            'exclusive_call_count': exclusive, 'effective_calls': shared_count + exclusive,
             'behavior_evaluated': False, 'html_exists': (folder / 'final_code.html').is_file()})
     write_json(batch / 'batch.json', manifest)
     write_json(batch / 'artifact_manifest.json', {p.relative_to(batch).as_posix(): sha256(p)
