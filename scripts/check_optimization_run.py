@@ -24,6 +24,8 @@ def snapshot(state_dir):
     if not root.is_relative_to(state_dir):
         raise ValueError('Result root is outside the recorded round')
     manifests = sorted(root.glob('*/batch.json'))
+    if (root/'batch.json').is_file():
+        manifests.append(root/'batch.json')
     if len(manifests) > 1:
         result['issues'].append('multiple_batches_require_explicit_review')
     for path in manifests:
@@ -31,7 +33,8 @@ def snapshot(state_dir):
         result['batch_status'] = batch.get('status')
         result['batch_path'] = str(path)
         for entry in batch.get('runs', []):
-            folder = Path(entry['folder']).resolve()
+            folder = Path(entry['folder']).resolve() if 'folder' in entry else (
+                root/(entry['view']+'__'+entry['method'])).resolve()
             if not folder.is_relative_to(root):
                 raise ValueError('Arm folder outside result root')
             summary = read_json(folder/'run_summary.json')
@@ -42,10 +45,13 @@ def snapshot(state_dir):
                 'fusion_mode':summary.get('fusion_mode'),'call_count':summary.get('call_count'),
                 'call_failures':failures,'unresolved_relation_count':summary.get('unresolved_relation_count',0),
                 'relation_validation_status':summary.get('relation_validation_status'),'html_exists':(folder/'final_code.html').is_file()})
-    for path in sorted(root.glob('*.zip')):
+    archives = list(root.glob('*.zip'))
+    if root.with_suffix('.zip').is_file():
+        archives.append(root.with_suffix('.zip'))
+    for path in sorted(archives):
         result['archives'].append({'path':str(path),'bytes':path.stat().st_size,
             'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
-    if record.get('status') in {'finished','failed'}:
+    if record.get('status') in {'finished','finished_pending_review','failed'}:
         result['status'] = 'finished_with_failures' if record.get('status')=='failed' or any(r['call_failures'] for r in result['runs']) else 'finished_pending_review'
         if not result['archives']:
             result['issues'].append('terminal_state_without_archive')
