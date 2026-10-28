@@ -18,3 +18,9 @@
 
 5. 待实施：先保存旧源码、必要工程检查、限定文件提交推送codex分支、Ubuntu独立检出复用原UV。启动保存版本/输入/PID/日志/实际批次/ZIP。所有首次失败保留，无模型重试。
 6. 待验收：只在实际新页面证明相应用户失败修复后保留；如无收益，重新定位源坐标/归属而非微调包含阈值。13例开发材料、同实施者非独立人工、冻结论文评分不变。窗口最多52轮止审，不延长。
+
+## 实际启动
+
+生成提交51bcae0f227742d439b44a3199f759fb68426077已推送；Git bundle经Ubuntu验证再同步至独立检出 `/wyw/meeting_agent_workspace/my_agent_parent_geometry_v1`。本机28项工程检查通过，Ubuntu同28项及2项图像来源测试通过，未安装依赖。本机首次额外来源路径测试因系统临时目录权限失败，改用工作区临时目录后通过；初始“交叉区域”测试夹具实际为嵌套框，已在启动前纠正夹具，不改算法规则。旧48状态诊断重编译只验证基线一致性，不计新生成效果。
+
+2026-10-29 01:21:45（北京时间）启动PID138067。原UV解释器 `/wyw/meeting_agent_workspace/my_agent/.venv/bin/python`。状态目录 `/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round49_20261028T172145Z`，日志full_frame.log/worker.log；实际批次 `results/full_frame/20261028T172146Z_1a20ecfe`，预期原包为该状态目录的results.zip。本轮两次共享物理调用上限，不开第三规划调用；8192/600秒/零重试。完整旋转图SHA340bfd115af912a98a074bc77a8eb00248e8d9e8d47578a0af79b800a495c7c6，口述SHAf2a296756bdebe242cad8676f3a7851e42708779d73597f8770175cf76ac2aff。启动时状态running，真实效果待验收，不等于工程检查通过即有效。PID/路径/输入/版本已持久写current_remote和window_progress；窗口已启动7/10、验收6/10。
