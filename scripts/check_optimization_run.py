@@ -3,6 +3,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import shlex
 import subprocess
@@ -20,6 +21,18 @@ def snapshot(state_dir):
               'state_dir': str(state_dir), 'worker_status': record.get('status'),
               'finished_utc': record.get('finished_utc'), 'exit_code': record.get('exit_code'),
               'runs': [], 'archives': [], 'issues': []}
+    weight = state_dir/'vendor/deeplsd_md.tar'
+    if weight.is_file():
+        result['weight_progress'] = {'bytes': weight.stat().st_size,
+            'modified_utc': datetime.fromtimestamp(weight.stat().st_mtime, timezone.utc).isoformat()}
+    pid = record.get('worker_pid')
+    if pid and record.get('status') not in {'finished','finished_pending_review','failed'}:
+        try:
+            os.kill(int(pid), 0)
+            result['worker_process_exists'] = True
+        except ProcessLookupError:
+            result['worker_process_exists'] = False
+            result['issues'].append('recorded_worker_process_missing')
     root = Path(record['result_root']).resolve()
     if not root.is_relative_to(state_dir):
         raise ValueError('Result root is outside the recorded round')
@@ -57,6 +70,8 @@ def snapshot(state_dir):
             result['issues'].append('terminal_state_without_archive')
     else:
         result['status']='running'
+        if result.get('worker_process_exists') is False:
+            result['status']='worker_missing_requires_audit'
         if result['archives'] or str(result.get('batch_status','')).startswith('generation_finished'):
             result['status']='completed_artifacts_worker_state_stale'
             result['issues'].append('worker_state_lags_completed_artifacts')
