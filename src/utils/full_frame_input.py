@@ -8,17 +8,39 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def historical_package_path(case):
+    case=Path(case).resolve()
+    local=case/'preprocess/metadata/package.json'
+    if local.is_file():return local
+    # Legacy development cases retain their preprocessing run outside pilot_cases.
+    if case.parent.name!='pilot_cases' or case.parent.parent.name!='outputs':
+        raise ValueError('External historical package requires project pilot_cases')
+    project=case.parents[2]
+    manifest=json.loads((case/'case.json').read_text(encoding='utf-8'))
+    value=manifest.get('preprocess_package')
+    if not isinstance(value,str):raise ValueError('Historical package reference missing')
+    path=Path(value)
+    path=(path if path.is_absolute() else project/path).resolve()
+    if (not path.is_relative_to(project/'outputs/preprocess') or path.name!='package.json'
+            or path.parent.name!='metadata' or not path.is_file()):
+        raise ValueError('Historical package outside project preprocessing records')
+    return path
+
+
 def recover_full_frame(case, output):
     import cv2
     case = Path(case).resolve()
     output = Path(output)
-    package_path = case / 'preprocess/metadata/package.json'
+    package_path = historical_package_path(case)
+    source_root=package_path.parent.parent
+    project=case.parents[2] if case.parent.name=='pilot_cases' and case.parent.parent.name=='outputs' else case
     package = json.loads(package_path.read_text(encoding='utf-8'))
     manifest = json.loads((case / 'case.json').read_text(encoding='utf-8'))
     def source(key):
-        p = Path(package[key]).resolve()
-        if not p.is_relative_to(case / 'preprocess') or not p.is_file():
-            raise ValueError('Historical source must be retained within this case')
+        value=Path(package[key])
+        p = (value if value.is_absolute() else project/value).resolve()
+        if not p.is_relative_to(source_root) or not p.is_file():
+            raise ValueError('Historical source must be retained within its preprocessing run')
         return p
     raw = source('selected_sketch_path')
     crop = source('orientation_corrected_sketch_path')
@@ -36,7 +58,7 @@ def recover_full_frame(case, output):
         raise ValueError('Cannot save complete oriented frame')
     record = dict(raw_source=str(raw), raw_sha256=digest(raw),
                   historical_crop=str(crop), frozen_crop_sha256=digest(frozen),
-                  package_sha256=digest(package_path), raw_size=[image.shape[1], image.shape[0]],
+                  package_sha256=digest(package_path), package_path=str(package_path), raw_size=[image.shape[1], image.shape[0]],
                   output_sha256=digest(output / 'image.jpg'), rotation_degrees=degrees,
                   transformation='rotation_only_no_crop_no_resize',
                   timestamp_status='historical filename only; verify against video timestamps separately',

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts.launch_fragment_boundary_probe import resolve_probe_case
 from scripts.run_pilot_experiment import write_json, sha256
-from src.utils.full_frame_input import recover_full_frame
+from src.utils.full_frame_input import recover_full_frame,historical_package_path
 
 
 def main():
@@ -20,21 +20,21 @@ def main():
     p.add_argument('--project', type=Path, required=True)
     p.add_argument('--state', type=Path)
     p.add_argument('--worker', action='store_true')
-    p.add_argument('--experiment', choices=['input','focus','permutation','observation','content_guard','region_slots','region_coordinates','relative_layout','observed_extents','semantic_slots'], default='input')
+    p.add_argument('--experiment', choices=['input','focus','permutation','observation','content_guard','region_slots','region_coordinates','relative_layout','observed_extents','semantic_slots','semantic_slots_pc'], default='input')
     a = p.parse_args()
-    case = resolve_probe_case(a.project, '008_asr_20261022T105518Z_946eac')
+    case = resolve_probe_case(a.project, '002_chat_asr_v1' if a.experiment=='semantic_slots_pc' else '008_asr_20261022T105518Z_946eac')
     cycles = a.project / 'outputs/optimization_cycles'
     lock = cycles / 'active_generation.lock'
     if not a.worker:
         if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
             raise ValueError('Independent checkout must be clean')
-        round_id={'input':'38','focus':'39','permutation':'40','observation':'41','content_guard':'42','region_slots':'43','region_coordinates':'44','relative_layout':'45','observed_extents':'46','semantic_slots':'47'}[a.experiment]
+        round_id={'input':'38','focus':'39','permutation':'40','observation':'41','content_guard':'42','region_slots':'43','region_coordinates':'44','relative_layout':'45','observed_extents':'46','semantic_slots':'47','semantic_slots_pc':'48'}[a.experiment]
         state = cycles / ('round'+round_id+'_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
         with lock.open('x') as f:
             json.dump({'state': str(state)}, f)
         state.mkdir(exist_ok=False)
         r = dict(round=round_id, experiment=a.experiment, status='launching', head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
-                 checkout=str(ROOT), physical_llm_call_budget=3 if a.experiment in {'permutation','region_slots','region_coordinates','relative_layout','observed_extents','semantic_slots'} else 2, deep_network_forward_cap=0,
+                 checkout=str(ROOT), physical_llm_call_budget=3 if a.experiment in {'permutation','region_slots','region_coordinates','relative_layout','observed_extents','semantic_slots','semantic_slots_pc'} else 2, deep_network_forward_cap=0,
                  result_root=str(state/'results'), python_executable=sys.executable)
         write_json(state/'run.json', r)
         with (state/'worker.log').open('ab') as log:
@@ -62,29 +62,30 @@ def main():
         evidence.mkdir(parents=True)
         shutil.copyfile(provenance['raw_source'], evidence/'original_selected_frame.jpg')
         shutil.copyfile(provenance['historical_crop'], evidence/'historical_crop.jpg')
-        shutil.copyfile(case/'preprocess/metadata/package.json', evidence/'historical_package.json')
+        shutil.copyfile(historical_package_path(case), evidence/'historical_package.json')
         shutil.copyfile(full/'image.jpg', evidence/'full_frame_oriented.jpg')
         write_json(evidence/'provenance.json',provenance)
         env=os.environ.copy();env['MAVIS_ENV_FILE']=str(a.project/'.env')
         executions=[('full_frame',full)] if a.experiment!='input' else [('frozen_crop',case),('full_frame',full)]
-        comparison={'input':'chain_regression','focus':'chain_focus','permutation':'chain_permutation','observation':'chain_observation','content_guard':'chain_content_guard','region_slots':None,'region_coordinates':None,'relative_layout':None,'observed_extents':None,'semantic_slots':None}[a.experiment]
+        comparison={'input':'chain_regression','focus':'chain_focus','permutation':'chain_permutation','observation':'chain_observation','content_guard':'chain_content_guard','region_slots':None,'region_coordinates':None,'relative_layout':None,'observed_extents':None,'semantic_slots':None,'semantic_slots_pc':None}[a.experiment]
         for name, source in executions:
-            region_runner = 'run_relative_layout_comparison.py' if a.experiment in {'relative_layout','observed_extents','semantic_slots'} else 'run_region_coordinate_comparison.py' if a.experiment=='region_coordinates' else 'run_source_region_comparison.py'
+            region_runner = 'run_relative_layout_comparison.py' if a.experiment in {'relative_layout','observed_extents','semantic_slots','semantic_slots_pc'} else 'run_region_coordinate_comparison.py' if a.experiment=='region_coordinates' else 'run_source_region_comparison.py'
             command = [sys.executable,str(ROOT/'scripts'/region_runner),
-                       '--case',str(source),'--output-root',str(state/'results'/name)] if a.experiment in {'region_slots','region_coordinates','relative_layout','observed_extents','semantic_slots'} else [
+                       '--case',str(source),'--output-root',str(state/'results'/name)] if a.experiment in {'region_slots','region_coordinates','relative_layout','observed_extents','semantic_slots','semantic_slots_pc'} else [
                        sys.executable,str(ROOT/'scripts/run_fragment_boundary_comparison.py'),
                        '--case',str(source),'--output-root',str(state/'results'/name),'--comparison',comparison]
             if a.experiment=='observed_extents':command.append('--observed-extents')
-            if a.experiment=='semantic_slots':command.append('--semantic-slots')
+            if a.experiment in {'semantic_slots','semantic_slots_pc'}:command.append('--semantic-slots')
             with (state/(name+'.log')).open('wb') as log:
                 subprocess.run(command,cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,
-                               timeout={'input':680,'focus':1250,'permutation':1900,'observation':1250,'content_guard':1250,'region_slots':1900,'region_coordinates':1900,'relative_layout':1900,'observed_extents':1900,'semantic_slots':1900}[a.experiment],check=True)
+                               timeout={'input':680,'focus':1250,'permutation':1900,'observation':1250,'content_guard':1250,'region_slots':1900,'region_coordinates':1900,'relative_layout':1900,'observed_extents':1900,'semantic_slots':1900,'semantic_slots_pc':1900}[a.experiment],check=True)
         artifacts={x.relative_to(state).as_posix():sha256(x) for x in state.rglob('*')
                    if x.is_file() and x.suffix not in ['.log'] and x.name not in ['run.json','launch.json']}
         write_json(state/'evidence_manifest.json',dict(head=r['head'],artifact_sha256=artifacts,
-                   scope=('fresh complete source scaffold, bounded source-backed membership and original-slot ordering; no inventory or weight regeneration' if a.experiment=='semantic_slots' else
+                   scope=('PC development regression of frozen semantic_slots_v1; same historical full frame, no new generation mechanism' if a.experiment=='semantic_slots_pc' else
+                          'fresh complete source scaffold, bounded source-backed membership and original-slot ordering; no inventory or weight regeneration' if a.experiment=='semantic_slots' else
                           'same fresh tree and objects, model weights versus observed geometry spans; absolute HTML reference; no extra calls' if a.experiment=='observed_extents' else
-                          'fresh shared vision/architect objects; absolute baseline HTML versus source-backed relative region tree and identical controlled renderer' if a.experiment in {'relative_layout','observed_extents','semantic_slots'} else
+                          'fresh shared vision/architect objects; absolute baseline HTML versus source-backed relative region tree and identical controlled renderer' if a.experiment in {'relative_layout','observed_extents','semantic_slots','semantic_slots_pc'} else
                           'fresh shared source inventory; decimal versus native-1000 coordinate contract, explicit fixed decoder; no HTML' if a.experiment=='region_coordinates' else
                           'joint region grounding versus verbatim source inventory and complete immutable-slot grounding; no boundary prerequisite or HTML' if a.experiment=='region_slots' else
                           'shared fresh selection; independent content point observation and deterministic outside-page veto' if a.experiment=='content_guard' else
