@@ -18,6 +18,22 @@ from scripts.run_generation_comparison import BudgetClient, source_record
 from scripts.run_input_audit_comparison import CappedProvider
 
 
+def realized_accounting(upstream, candidate, frozen):
+    """Attempt counts are not successful stages or known billed tokens."""
+    shared = len(upstream) if frozen else min(1, len(upstream))
+    baseline = 0 if frozen else max(0, len(upstream) - shared)
+    calls = upstream + candidate
+    usage_known = all(isinstance(c.get('response', {}).get('usage', {}).get('total_tokens'), int) for c in calls)
+    return {'physical_attempts': len(calls), 'returned_calls': sum(c.get('status') == 'returned' for c in calls),
+        'shared_attempts': shared, 'baseline_exclusive_attempts': baseline,
+        'candidate_exclusive_attempts': len(candidate), 'baseline_effective_attempts': shared + baseline,
+        'candidate_effective_attempts': shared + len(candidate),
+        'candidate_stage_attempted': bool(candidate), 'usage_complete': usage_known,
+        'known_reported_tokens': sum(c.get('response', {}).get('usage', {}).get('total_tokens', 0) or 0 for c in calls),
+        'total_tokens_if_known': sum(c['response']['usage']['total_tokens'] for c in calls) if usage_known else None,
+        'billing_cost_known': False}
+
+
 def main():
     from dotenv import load_dotenv
     from openai import OpenAI
@@ -134,7 +150,7 @@ def main():
         manifest['semantic_plan_status'] = state['page_meta'].get('semantic_plan', state['page_meta'].get('frozen_inventory_layout', {}))['status']
         manifest['region_layout_status'] = state['page_meta']['region_layout']['status']
     except Exception as exc:
-        manifest['candidate_status'] = 'validation_or_generation_failed'
+        manifest['candidate_status'] = 'validation_or_generation_failed' if planned.calls else 'not_evaluated_upstream_failed'
         manifest['candidate_error_type'] = type(exc).__name__
         if isinstance(exc, ValueError):
             manifest['candidate_validation_reason'] = str(exc)
@@ -145,11 +161,15 @@ def main():
         finished_utc=datetime.now(timezone.utc).isoformat(),
         runs=[{'folder': str(baseline)}, {'folder': str(candidate)}])
     frozen = args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}
+    manifest['planned_call_accounting'] = manifest['call_accounting']
+    manifest['realized_call_accounting'] = realized_accounting(upstream.calls, planned.calls, frozen)
     shared_count = len(upstream.calls) if frozen else min(1, len(upstream.calls))
     for folder, arm, exclusive in [(baseline, 'baseline', 0 if frozen else max(0, len(upstream.calls) - 1)), (candidate, 'candidate', len(planned.calls))]:
         write_json(folder / 'run_summary.json', {'status': manifest[arm + '_status'],
             'shared_vision_sha256': manifest.get('shared_vision_sha256'), 'shared_call_count': shared_count,
             'exclusive_call_count': exclusive, 'effective_calls': shared_count + exclusive,
+            'call_counts_are_attempts': True,
+            'candidate_stage_attempted': bool(planned.calls),
             'behavior_evaluated': False, 'html_exists': (folder / 'final_code.html').is_file()})
     write_json(batch / 'batch.json', manifest)
     write_json(batch / 'artifact_manifest.json', {p.relative_to(batch).as_posix(): sha256(p)
