@@ -17,3 +17,27 @@
 
 5. 实施验证：待限定提交、两端工程检查、独立UV真实生成及原包/浏览器验收。
 6. 决定：有局部比例收益才保留可选机制，整体失败仍报告；下一轮按剩余来源/区域类型失败定位，不用本轮权重机制掩盖缺容器或卡片轴错误。
+
+
+## 实际启动
+代码 50eac3fc3cf8e4fb517b70edc58ee929e06a9422；PID132299；两端23项工程检查通过，不代表收益。
+状态：/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round46_20261028T135116Z
+批次：/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round46_20261028T135116Z/results/full_frame/20261028T135117Z_1cf61b77
+原包：/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round46_20261028T135116Z/results.zip
+日志：/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round46_20261028T135116Z/full_frame.log 和 worker.log。原UV解释器，等待原始结果验收。
+
+## 真实验收：原树漏项，观测权重机制尚未执行
+
+13:52:19 UTC结束。原ZIP SHA256 `7b6e0c9909d3df920dc6e17eb8ace7208653bd8a0366a9572dbab29b756dac1b`，包内和额外输入来源99次哈希引用全部通过。本地 `outputs/optimization/round46_observed_extent/` 保存原包、全部来源、hash_audit.json、audit.json、browser/audit.json、截图及main_supplement.json。没有运行任务，无重试/安装/深网/旧HTML修补。
+
+本轮共享新源状态SHA256 `9675b860798daae36572b5d8032775f7deb760e7d07ff9af0861fe646a246e34`，16对象。原规划树只覆盖15个源对象，遗漏e5 divider；源ID16、树源ID15，没有未知ID补造。原始call与relative_plan_proposal可核对，不是后处理清掉分割线。完整性校验按预定规则报 `Every source object must appear exactly once`，在计算观测权重之前终止；没有baseline_model_weights或candidate_observed_extent HTML，因此本轮两组权重对照未成立，不能填比例误差、候选DOM/操作成绩，更不能据此声称观测跨度机制已被实效否定。模型权重仍全部1属于原始观察，不以补入遗漏叶子重跑救结果。
+
+额外语义风险：原树把导航容器e13和三个导航按钮一起列为兄弟，不是把按钮放入e13；地图引用组中还包含登录按钮。即使补线也不代表全部区域身份正确，本轮未作此补救。
+
+仅原绝对坐标参考页有HTML，已online实际输入/点击并看截图，HTML哈希未变。主输入1/1，自动精确标签审计四项反馈4/5；真实主按钮文字是“回主界面”而非“主界面”，原图/口述/新状态确认唯一e14，另做e14真实点击，收到“已点击：回主界面”。因此固定五项任务经补充实操为5/5，保留自动未匹配记录，未挑替代按钮。16/16状态到DOM位置尺寸吻合，0越界/ID唯一；五条结构0/5，矩形自动4/5、唯一e14与e13补充实际矩形核验后5/5。矩形包含不等于语义声明或DOM嵌套。截图有地图主体、卡片、底栏，但地点文字在卡片外、分割线过厚，不能称完整页面可用。没有候选，不提供候选预览或虚构配对提升。
+
+3物理调用正常stop，共享视觉2377token/21.019123秒、架构4266token/28.436717秒、规划2097token/11.619289秒，总8740token/61.075129秒。预算未增，规划失败不重试。预定两权重组有效各3的设计由于未出配对页面未能兑现；原绝对坐标参考有效2，整轮实际仍3，绝不算6或8。
+
+导师idea-evaluator/fatal-flaws审查：不把“未执行”写成“机制已被反驳”，但完整树重写接口在本轮新源上没有保全对象。维持完整性拒绝，不吞线、不手工补树、不放宽契约；先转向职责定位：为何要求模型再次生成不可删的整个清单，能否由代码保留完整对象骨架、模型仅提供有来源的区域归属，而不是掌管对象是否存在。此项仅为下一目标，尚未实施，仍须先卡及独立预算；不能继续仅加“请不要漏项”提示。比例证据正确性仍是待验证问题，不默认成功。
+
+窗口4/10已完成，用户页面提升依然未达标。只做008开发例，同实施者核验，非独立人工。冻结评分、ASR/原帧保持。下一轮入口已写current_remote.json、round46_final_remote.json和window_progress.json。
