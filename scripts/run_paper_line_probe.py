@@ -25,6 +25,24 @@ def digest(path):
         return hashlib.file_digest(f, 'sha256').hexdigest()
 
 
+def load_official_deeplsd(torch, factory, checkpoint_path, device):
+    # Fixed, reviewed OmegaConf metadata types from the official MegaDepth checkpoint.
+    # Never import arbitrary globals named by a downloaded pickle.
+    import collections
+    import typing
+    from omegaconf.nodes import AnyNode
+    from omegaconf.base import ContainerMetadata, Metadata
+    from omegaconf.listconfig import ListConfig
+    from omegaconf.dictconfig import DictConfig
+    allowed = [collections.defaultdict, list, dict, int, AnyNode, ContainerMetadata,
+               typing.Any, ListConfig, Metadata, DictConfig]
+    with torch.serialization.safe_globals(allowed):
+        checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
+    candidate = factory({'detect_lines': True}).eval().to(device)
+    candidate.load_state_dict(checkpoint['model'], strict=True)
+    return candidate
+
+
 def infer(args):
     import cv2
     import numpy as np
@@ -53,13 +71,13 @@ def infer(args):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     try:
         from deeplsd.models.deeplsd_inference import DeepLSD
-        model = DeepLSD({'detect_lines': True}).eval().to(device)
-        checkpoint = torch.load(args.state/'vendor/deeplsd_md.tar', map_location='cpu', weights_only=True)
-        model.load_state_dict(checkpoint['model'], strict=True)
+        model = load_official_deeplsd(torch, DeepLSD, args.state/'vendor/deeplsd_md.tar', device)
     except Exception as e:
+        model = None
         deep_error = {'error_type': type(e).__name__, 'reason': str(e)}
         write(out/'deeplsd_load_failure.json', deep_error)
     runs = []
+    forward_calls = 0
     for view_name, (view, offset) in views.items():
         cv2.imwrite(str(out/(view_name+'.png')), view)
         gray = cv2.cvtColor(view, cv2.COLOR_BGR2GRAY)
@@ -82,6 +100,7 @@ def infer(args):
                     if device == 'cuda':
                         torch.cuda.synchronize()
                     with torch.inference_mode():
+                        forward_calls += 1
                         prediction = model({'image': tensor})
                     if device == 'cuda':
                         torch.cuda.synchronize()
@@ -103,8 +122,13 @@ def infer(args):
             record['elapsed_seconds'] = time.monotonic()-start
             write(folder/'run_summary.json', record)
             runs.append(record)
-    manifest = {'status': 'detected_pending_paper_and_boundary_review', 'runs': runs,
+    manifest = {'status': ('partial_failure' if any(r['status']=='failed' for r in runs)
+                          else 'detected_pending_paper_and_boundary_review'), 'runs': runs,
                 'paper': paper, 'model_device': device, 'physical_llm_calls': 0,
+                'checkpoint_loaded': model is not None, 'actual_forward_calls': forward_calls,
+                'runtime': {'python_executable': sys.executable, 'python_version': sys.version,
+                            'cv2_path': cv2.__file__, 'torch_path': torch.__file__,
+                            'numpy_path': np.__file__, 'cuda_available': torch.cuda.is_available()},
                 'checkpoint_sha256': digest(args.state/'vendor/deeplsd_md.tar'),
                 'external_code_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'],
                     cwd=args.state/'vendor/DeepLSD', text=True).strip(),
