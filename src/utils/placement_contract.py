@@ -3,7 +3,23 @@ import json
 import math
 
 def compile_placement_contract(state):
-    if (state.get('page_meta',{}).get('layout_solver') or {}).get('version') != 'hierarchy-v1':
+    meta = state.get('page_meta', {})
+    explicit = meta.get('coordinate_contract')
+    if explicit is not None:
+        from src.utils.coordinate_contract import _size, _id
+        if not isinstance(explicit, dict) or explicit.get('version') != 'evidence-layout-v1' or explicit.get('status') != 'engineering_contract_validated_semantics_not_evaluated':
+            raise ValueError('Placement requires a validated explicit coordinate contract')
+        viewport = explicit.get('viewport', {})
+        viewport_id = _id(viewport.get('id'))
+        size = _size(viewport)
+        if size != meta.get('viewport') or explicit.get('placement_count') != len(state['elements']):
+            raise ValueError('Explicit placement viewport or inventory count mismatch')
+        frame = explicit.get('frame', {})
+        import re
+        _id(frame.get('id')); _size(frame)
+        if not isinstance(frame.get('sha256'), str) or not re.fullmatch('[0-9a-f]{64}', frame['sha256']):
+            raise ValueError('Explicit placement requires frame provenance')
+    elif (meta.get('layout_solver') or {}).get('version') != 'hierarchy-v1':
         raise ValueError('Placement contract requires hierarchy-v1')
     rows=[]
     ids=set()
@@ -13,6 +29,15 @@ def compile_placement_contract(state):
             raise ValueError('Duplicate placement id')
         ids.add(key)
         box=e['spatial_info']['bbox']
+        if explicit is not None:
+            from src.utils.coordinate_contract import _bbox
+            spatial = e['spatial_info']
+            if spatial.get('coordinate_space') != 'viewport_px' or spatial.get('viewport_id') != viewport_id or spatial.get('source') != 'explicit_layout_plan':
+                raise ValueError('Explicit placement has wrong coordinate space or viewport source')
+            derivation = spatial.get('derivation', {})
+            if derivation.get('kind') != 'semantic_layout' or not derivation.get('evidence_refs') or not isinstance(derivation.get('reason'), str) or not derivation['reason'].strip():
+                raise ValueError('Explicit placement lacks layout derivation')
+            _bbox(box, size['width'], size['height'])
         if len(box)!=4 or not all(isinstance(x,(int,float)) and math.isfinite(x) for x in box):
             raise ValueError('Invalid placement bbox')
         x,y,right,bottom=box
@@ -21,7 +46,7 @@ def compile_placement_contract(state):
         rows.append({'id':key,'dom_parent':'page-root','semantic_parent':e.get('parent_id'),
                      'style':f'position:absolute;left:{x}px;top:{y}px;width:{right-x}px;height:{bottom-y}px;box-sizing:border-box;margin:0;',
                      'type':e.get('type'),'text':e.get('text','')})
-    return {'coordinate_space':'page_global','root_id':'page-root','viewport':state['page_meta']['viewport'],'placements':rows}
+    return {'coordinate_space':'viewport_px' if explicit is not None else 'page_global','root_id':'page-root','viewport':state['page_meta']['viewport'],'placements':rows}
 
 def placement_instructions(state):
     manifest=compile_placement_contract(state)
