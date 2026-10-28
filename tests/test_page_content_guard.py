@@ -3,7 +3,7 @@ from src.utils.page_content_guard import guard_selection
 
 
 def evidence(points, uncertain=False):
-    return dict(regions=[dict(id=str(i), name='visible UI region', point=p, visual_evidence='visible ink and controls') for i,p in enumerate(points)], uncertain=uncertain)
+    return dict(regions=[dict(id=str(i), name='visible UI region', membership='page_ui', point=p, visual_evidence='visible ink and controls') for i,p in enumerate(points)], uncertain=uncertain)
 
 
 class ContentGuardTests(unittest.TestCase):
@@ -36,6 +36,14 @@ class ContentGuardTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.run_guard([[500,800]])
         d=evidence([[.5,.5],[.6,.6]]);d['regions'][1]['id']='0'
         with self.assertRaises(ValueError):guard_selection(self.proposals,dict(candidate_id='short',unresolved_reason=None),d,100,100)
+
+    def test_included_outside_evidence_reports_excess_without_editing(self):
+        d=evidence([[.5,.5],[.85,.5]]);d['regions'][1]['membership']='outside_page'
+        r=guard_selection(self.proposals,dict(candidate_id='short',unresolved_reason=None),d,100,100)
+        self.assertIsNone(r['quad']);self.assertEqual(r['included_outside_page_region_ids'],['1'])
+        hint=r['excess_correction_hints'][0]['possible_inward_search_sides'][0]
+        self.assertEqual(hint['side'],'right');self.assertEqual(hint['inward_unit_vector'],[-1,0])
+        self.assertEqual(hint['current_point_to_edge_distance_pixels'],5)
 
     def test_winding_and_boundary_do_not_change_containment(self):
         for row in self.proposals['candidates']:row['quad']=list(reversed(row['quad']))

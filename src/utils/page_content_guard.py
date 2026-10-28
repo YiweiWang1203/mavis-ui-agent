@@ -11,7 +11,7 @@ def validate_regions(declaration):
         raise ValueError('regions must be an array')
     ids = set()
     for row in rows:
-        if not isinstance(row, dict) or set(row) != {'id', 'name', 'point', 'visual_evidence'}:
+        if not isinstance(row, dict) or set(row) != {'id', 'name', 'point', 'visual_evidence', 'membership'}:
             raise ValueError('Incomplete region evidence schema')
         for key in ['id', 'name', 'visual_evidence']:
             if not isinstance(row[key], str) or not row[key].strip():
@@ -19,6 +19,8 @@ def validate_regions(declaration):
         if row['id'] in ids:
             raise ValueError('Duplicate region ID')
         ids.add(row['id'])
+        if row['membership'] not in {'page_ui', 'outside_page'}:
+            raise ValueError('Unknown page membership')
         point = row['point']
         if not isinstance(point, list) or len(point) != 2 or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in point):
             raise ValueError('Region point outside normalized image; no repair')
@@ -45,9 +47,9 @@ def region_audit(proposals, declaration, width, height):
                     raise ValueError('Degenerate side')
                 distances[side] = sign*((b[0]-a[0])*(y-a[1])-(b[1]-a[1])*(x-a[0]))/length
             outside = [side for side, distance in distances.items() if distance < -1e-9]
-            checks.append(dict(region_id=row['id'], inside=not outside, outside_sides=outside, inward_signed_distance_pixels=distances))
+            checks.append(dict(region_id=row['id'], membership=row['membership'], inside=not outside, outside_sides=outside, inward_signed_distance_pixels=distances))
         results.append(dict(candidate_id=candidate['id'], points=checks,
-                            compatible_with_observed_points=bool(rows) and not declaration['uncertain'] and all(p['inside'] for p in checks)))
+                            compatible_with_observed_points=any(p['membership']=='page_ui' for p in checks) and not declaration['uncertain'] and all(p['inside'] if p['membership']=='page_ui' else not p['inside'] for p in checks)))
     return results
 
 
@@ -59,11 +61,11 @@ def guard_selection(proposals, selection, declaration, width, height):
         return dict(original, **common)
     chosen = next(row for row in audits if row['candidate_id'] == selection['candidate_id'])
     if not chosen['compatible_with_observed_points']:
-        hints = []
+        hints = [];excess_hints=[]
         q = original['quad']
         sign = 1 if sum(q[i][0]*q[(i+1)%4][1]-q[(i+1)%4][0]*q[i][1] for i in range(4)) > 0 else -1
         for i, side in enumerate(['top', 'right', 'bottom', 'left']):
-            offending = [p for p in chosen['points'] if side in p['outside_sides']]
+            offending = [p for p in chosen['points'] if p['membership']=='page_ui' and side in p['outside_sides']]
             if not offending:
                 continue
             a, b = q[i], q[(i+1)%4]; length = math.dist(a, b)
@@ -71,7 +73,18 @@ def guard_selection(proposals, selection, declaration, width, height):
                 outward_unit_vector=[sign*(b[1]-a[1])/length, -sign*(b[0]-a[0])/length],
                 minimum_parallel_outward_shift_to_include_observed_points_pixels=max(-p['inward_signed_distance_pixels'][side] for p in offending),
                 instruction='Seek supported page boundary outward on this side; this lower bound only covers observed points and is not a new edge location'))
-        return dict(status='unresolved', quad=None, reason='Selected page is refuted by outside UI points or content observation is insufficient',
-                    rejected_candidate_id=selection['candidate_id'], outside_region_ids=[r['region_id'] for r in chosen['points'] if not r['inside']],
-                    correction_hints=hints, **common)
+        for point in chosen['points']:
+            if point['membership']!='outside_page' or not point['inside']:continue
+            alternatives=[]
+            for i,side in enumerate(['top','right','bottom','left']):
+                a,b=q[i],q[(i+1)%4];length=math.dist(a,b)
+                alternatives.append(dict(side=side,inward_unit_vector=[-sign*(b[1]-a[1])/length,sign*(b[0]-a[0])/length],
+                    current_point_to_edge_distance_pixels=point['inward_signed_distance_pixels'][side]))
+            alternatives.sort(key=lambda r:r['current_point_to_edge_distance_pixels'])
+            excess_hints.append(dict(region_id=point['region_id'],possible_inward_search_sides=alternatives,
+                instruction='This independently observed outside-page point was included; seek supported inward boundary. Nearest side is only a geometric suggestion, not proof of which edge is wrong; preserve legitimate UI whitespace'))
+        return dict(status='unresolved', quad=None, reason='Selected page contradicts observed UI/background membership or observation is insufficient',
+                    rejected_candidate_id=selection['candidate_id'], outside_region_ids=[r['region_id'] for r in chosen['points'] if r['membership']=='page_ui' and not r['inside']],
+                    included_outside_page_region_ids=[r['region_id'] for r in chosen['points'] if r['membership']=='outside_page' and r['inside']],
+                    correction_hints=hints, excess_correction_hints=excess_hints, **common)
     return dict(original, **common, content_guard_status='not_refuted_by_observed_points')

@@ -172,12 +172,14 @@ def main():
                 'No candidate IDs, no inferred hidden edges.')
         if arm=='page_content_guard_v1':
             prompt=('Observe the original photograph and user intent, without guessing any page boundary. '
-                'Identify the visible major UI regions belonging to the same hand-drawn interface. '
+                'Identify visible major UI regions belonging to the same hand-drawn interface AND clearly observed points outside that drawn UI page. '
                 'For each region choose one unambiguous point INSIDE its actual visible content. '
                 'Include visible peripheral UI regions as well as central ones; do not invent content from the speech. '
-                'Exclude paper edges, table texture, bleed-through marks and explanatory annotations outside the UI. '
+                'Label membership page_ui for visible UI content, outside_page only for clearly observed content beyond the drawn UI page. '
+                'Outside paper, desk or annotations may provide outside_page evidence, but paper appearance or whitespace alone cannot prove outside_page: legitimate blank space can belong inside the UI. '
+                'Explain visual evidence for each membership. Do not force outside_page evidence if it is not clear. '
                 'Coordinates are fractions of ORIGINAL image width and height in [0,1], never pixels or 0-1000. '
-                'Return exactly {"regions":[{"id":"r1","name":"actual visible UI region","point":[x/width,y/height],"visual_evidence":"visible content justifying this point and UI membership"}],"uncertain":false}. '
+                'Return exactly {"regions":[{"id":"r1","name":"actual visible UI region","point":[x/width,y/height],"membership":"page_ui|outside_page","visual_evidence":"actual visible content and evidence for its page membership"}],"uncertain":false}. '
                 'IDs must be unique. If UI membership or point positions are uncertain set uncertain:true. '
                 'If no reliable UI region is visible return regions:[],uncertain:true. No candidate IDs or page bbox.')
         compact=[{k:r[k] for k in ['id','side_ids','area_fraction','projected_support']} for r in proposals['candidates']]
