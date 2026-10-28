@@ -80,3 +80,48 @@ def compile_relative_layout(state, transcript, tree):
         'limits':'Layout-only groups are not detected objects; quote validation is lexical, not semantic proof; DOM placement stays flat'}
     result['page_meta']['layout_solver']={'version':'hierarchy-v1','coordinate_space':'page_global','placement_mechanism':'relative_region_v1'}
     return result
+
+
+def compile_observed_extent_layout(state, transcript, tree):
+    # Validate the unchanged model plan first; this must not rescue an invalid source.
+    compile_relative_layout(state, transcript, tree)
+    weighted = copy.deepcopy(tree)
+    nodes = {e['id']: e for e in state['elements']}
+    view = state['page_meta']['viewport']
+    records = []
+
+    def bounds(row):
+        source_ids = ([row['id']] if row['id'] in nodes else [])
+        for child in row['children']:
+            source_ids.extend(bounds(child)[1])
+        boxes = [nodes[key]['spatial_info']['bbox'] for key in source_ids]
+        for box in boxes:
+            if (len(box) != 4 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in box)
+                    or not 0 <= box[0] < box[2] <= view['width']
+                    or not 0 <= box[1] < box[3] <= view['height']):
+                raise ValueError('Observed extent requires valid in-canvas source boxes')
+        return [min(b[0] for b in boxes), min(b[1] for b in boxes),
+                max(b[2] for b in boxes), max(b[3] for b in boxes)], source_ids
+
+    def reweight(row):
+        if not row['children']:
+            return
+        axis = 0 if row['axis'] == 'row' else 1
+        evidence = []
+        for child in row['children']:
+            box, ids = bounds(child)
+            evidence.append({'id':child['id'], 'source_ids':ids, 'source_bbox_union':box,
+                             'span':box[axis+2]-box[axis], 'model_weight':child['weight']})
+        total = sum(x['span'] for x in evidence)
+        for child, source in zip(row['children'], evidence):
+            child['weight'] = 100 * source['span'] / total
+            source['compiled_weight'] = child['weight']
+            reweight(child)
+        records.append({'parent':row['id'], 'axis':row['axis'], 'children':evidence})
+
+    reweight(weighted)
+    result = compile_relative_layout(state, transcript, weighted)
+    result['page_meta']['observed_extent_weights'] = {'version':'observed_extent_v1',
+        'original_model_tree':copy.deepcopy(tree), 'evidence':records,
+        'limitation':'Consistency with source geometry is not proof that source geometry or grouping is correct'}
+    return result

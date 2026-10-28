@@ -15,7 +15,7 @@ from scripts.run_pilot_experiment import load_inputs,execute,write_json,sha256
 from scripts.run_generation_comparison import BudgetClient,source_record
 from scripts.run_input_audit_comparison import CappedProvider
 from src.agents.global_spatial_planner import parse_spatial_response
-from src.utils.relative_region_layout import compile_relative_layout
+from src.utils.relative_region_layout import compile_relative_layout,compile_observed_extent_layout
 from src.renderers.controlled_components import render_controlled_components
 
 
@@ -25,12 +25,12 @@ def main():
     from dotenv import load_dotenv
     from openai import OpenAI
     from urllib.parse import urlsplit
-    p=argparse.ArgumentParser();p.add_argument('--case',type=Path,required=True);p.add_argument('--output-root',type=Path,required=True);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--case',type=Path,required=True);p.add_argument('--output-root',type=Path,required=True);p.add_argument('--observed-extents',action='store_true');a=p.parse_args()
     inputs=load_inputs(a.case.resolve(),'M2')
     batch=a.output_root/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8]);batch.mkdir(parents=True)
     for source in inputs['files'].values():shutil.copyfile(source,batch/source.name)
     shared=batch/'shared_upstream';shared.mkdir()
-    baseline=batch/'baseline_absolute';baseline.mkdir();candidate=batch/'candidate_relative';candidate.mkdir()
+    baseline=batch/'baseline_absolute';baseline.mkdir();candidate=batch/('candidate_observed_extent' if a.observed_extents else 'candidate_relative');candidate.mkdir()
     load_dotenv(os.getenv('MAVIS_ENV_FILE') or ROOT/'.env',override=True)
     endpoint=os.getenv('SILICONFLOW_BASE_URL') or os.getenv('VISION_BASE_URL');key=os.getenv('SILICONFLOW_API_KEY') or os.getenv('OPENAI_API_KEY');url=urlsplit(endpoint or '')
     if not key or url.scheme!='https' or not url.netloc or url.username or url.password or url.query or url.fragment:
@@ -69,7 +69,17 @@ def main():
         if response.choices[0].finish_reason!='stop':raise ValueError('Relative plan not complete; no retry')
         proposal=parse_spatial_response(response.choices[0].message.content);write_json(candidate/'relative_plan_proposal.json',proposal)
         if not isinstance(proposal,dict) or set(proposal)!={'tree'}:raise ValueError('Expected only relative tree')
-        result=compile_relative_layout(state,inputs['transcript'],proposal['tree']);write_json(candidate/'ui_state.json',result)
+        result=compile_relative_layout(state,inputs['transcript'],proposal['tree'])
+        if a.observed_extents:
+            control=batch/'baseline_model_weights';control.mkdir()
+            write_json(control/'ui_state.json',result)
+            write_json(control/'shared_state.json',state)
+            write_json(control/'relative_plan_proposal.json',proposal)
+            (control/'final_code.html').write_text(render_controlled_components(result),encoding='utf-8')
+            write_json(control/'run_summary.json',{'shared_calls':3,'exclusive_calls':0,'effective_calls':3,'behavior_evaluated':False})
+            result=compile_observed_extent_layout(state,inputs['transcript'],proposal['tree'])
+            manifest['paired_weight_comparison']={'shared_calls':3,'exclusive_calls':0,'effective_calls_each':3,'same_original_tree':True,'absolute_reference_effective_calls':2}
+        write_json(candidate/'ui_state.json',result)
         write_json(candidate/'shared_state.json',state)
         candidate_code=render_controlled_components(result);(candidate/'final_code.html').write_text(candidate_code,encoding='utf-8')
         manifest['candidate_status']='html_generated_pending_browser_review'
