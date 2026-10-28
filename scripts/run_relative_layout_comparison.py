@@ -16,6 +16,7 @@ from scripts.run_generation_comparison import BudgetClient,source_record
 from scripts.run_input_audit_comparison import CappedProvider
 from src.agents.global_spatial_planner import parse_spatial_response
 from src.utils.relative_region_layout import compile_relative_layout,compile_observed_extent_layout
+from src.utils.semantic_slot_layout import compile_semantic_slots
 from src.renderers.controlled_components import render_controlled_components
 
 
@@ -25,12 +26,13 @@ def main():
     from dotenv import load_dotenv
     from openai import OpenAI
     from urllib.parse import urlsplit
-    p=argparse.ArgumentParser();p.add_argument('--case',type=Path,required=True);p.add_argument('--output-root',type=Path,required=True);p.add_argument('--observed-extents',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--case',type=Path,required=True);p.add_argument('--output-root',type=Path,required=True)
+    mode=p.add_mutually_exclusive_group();mode.add_argument('--observed-extents',action='store_true');mode.add_argument('--semantic-slots',action='store_true');a=p.parse_args()
     inputs=load_inputs(a.case.resolve(),'M2')
     batch=a.output_root/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8]);batch.mkdir(parents=True)
     for source in inputs['files'].values():shutil.copyfile(source,batch/source.name)
     shared=batch/'shared_upstream';shared.mkdir()
-    baseline=batch/'baseline_absolute';baseline.mkdir();candidate=batch/('candidate_observed_extent' if a.observed_extents else 'candidate_relative');candidate.mkdir()
+    baseline=batch/'baseline_absolute';baseline.mkdir();candidate=batch/('candidate_semantic_slots' if a.semantic_slots else 'candidate_observed_extent' if a.observed_extents else 'candidate_relative');candidate.mkdir()
     load_dotenv(os.getenv('MAVIS_ENV_FILE') or ROOT/'.env',override=True)
     endpoint=os.getenv('SILICONFLOW_BASE_URL') or os.getenv('VISION_BASE_URL');key=os.getenv('SILICONFLOW_API_KEY') or os.getenv('OPENAI_API_KEY');url=urlsplit(endpoint or '')
     if not key or url.scheme!='https' or not url.netloc or url.username or url.password or url.query or url.fragment:
@@ -59,17 +61,19 @@ def main():
         manifest['baseline_status']='html_generated_pending_browser_review'
         payload={'original_transcript':inputs['transcript'],'target_viewport':state['page_meta']['viewport'],
             'immutable_objects':[{k:e.get(k) for k in ['id','type','text','rpa_action']} for e in state['elements']]}
+        if a.semantic_slots:
+            for record,e in zip(payload['immutable_objects'],state['elements']):record['source_bbox']=e['spatial_info']['bbox']
         write_json(candidate/'planner_inputs.json',payload)
         image=shared/'effective_image.jpg'
         image_url='data:image/jpeg;base64,'+base64.b64encode(image.read_bytes()).decode('ascii')
         planner.stage='relative_region_planner'
         response=planner.create(model=model,temperature=0,response_format={'type':'json_object'},messages=[
-            {'role':'system','content':(ROOT/'src/prompts/relative_region_layout.md').read_text(encoding='utf-8')},
+            {'role':'system','content':(ROOT/'src/prompts'/('semantic_slot_layout.md' if a.semantic_slots else 'relative_region_layout.md')).read_text(encoding='utf-8')},
             {'role':'user','content':[{'type':'text','text':json.dumps(payload,ensure_ascii=False)}, {'type':'image_url','image_url':{'url':image_url}}]}])
         if response.choices[0].finish_reason!='stop':raise ValueError('Relative plan not complete; no retry')
         proposal=parse_spatial_response(response.choices[0].message.content);write_json(candidate/'relative_plan_proposal.json',proposal)
-        if not isinstance(proposal,dict) or set(proposal)!={'tree'}:raise ValueError('Expected only relative tree')
-        result=compile_relative_layout(state,inputs['transcript'],proposal['tree'])
+        if not isinstance(proposal,dict) or set(proposal)!=({'groups'} if a.semantic_slots else {'tree'}):raise ValueError('Expected only declared layout contract')
+        result=compile_semantic_slots(state,inputs['transcript'],proposal['groups']) if a.semantic_slots else compile_relative_layout(state,inputs['transcript'],proposal['tree'])
         if a.observed_extents:
             control=batch/'baseline_model_weights';control.mkdir()
             write_json(control/'ui_state.json',result)
