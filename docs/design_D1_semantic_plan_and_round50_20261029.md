@@ -29,3 +29,13 @@
 ## 执行、验收与下一步
 
 新入口及编译适配已实现，本机44项测试方法通过（含6项新语义契约方法及38项回归，部分含异常子用例，不计页面样本），语法检查通过。模型生产函数至编译已由模拟响应验证单次调用、原始响应保存及失败不重试；没有把模拟结果算真实效果。待Ubuntu同检查通过后才启动；真实运行尚未启动。
+
+### 实际启动
+
+生成代码 `a59e2b0c09e10d623a4623ffe18fbcc7722b48eb` 已提交推送。Ubuntu独立检出 `/wyw/meeting_agent_workspace/my_agent_semantic_page_plan_a59e2b0`，原UV解释器 `/wyw/meeting_agent_workspace/my_agent/.venv/bin/python`；44项同工程检查通过，日志 `outputs/optimization_cycles/d1_03_a59e2b0_tests.log` 位于Ubuntu原项目，未安装依赖。导师按挑战—模块—证据检查判定可进入有限真实试验，不能据此宣布语义规划有效。
+
+北京时间2026-10-29 02:51:25已启动PID140490；状态目录 `/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round50_20261028T185124Z_semantic_plan`，实际批次 `results/20261028T185125Z_2620efd4`；预期原包为状态目录的 `results.zip`；日志为状态目录同级 `.worker.log`。工作记录已确认running，真实效果待验收。不能重复启动或修改此检出。
+
+完整图SHA256 `340bfd115af912a98a074bc77a8eb00248e8d9e8d47578a0af79b800a495c7c6`、口述 `f2a296756bdebe242cad8676f3a7851e42708779d73597f8770175cf76ac2aff`；复用49目录内只读输入资产，不读旧模型响应或HTML，新视觉在本轮重新调用。三物理调用上限，shared1、两组exclusive各1/effective各2；8192/600秒/零重试不变。窗口历史已启动8次、已验收7次，无总轮数上限；D1原型不冒计。
+
+下次验收必须先下载原ZIP/内部哈希，检查candidate原文、文本片段处置和所有区域/比例引用语义；类型冻结限制单报。候选失败或缺必需字段不追加请求修复。若有新HTML，用chat002固定七任务及主输入真实操作、截图、审查相关反馈层级，保留原HTML哈希；然后才给预览并决定保留/修订/转向。
