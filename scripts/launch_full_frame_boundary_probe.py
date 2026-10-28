@@ -20,7 +20,7 @@ def main():
     p.add_argument('--project', type=Path, required=True)
     p.add_argument('--state', type=Path)
     p.add_argument('--worker', action='store_true')
-    p.add_argument('--experiment', choices=['input','focus','permutation','observation'], default='input')
+    p.add_argument('--experiment', choices=['input','focus','permutation','observation','content_guard'], default='input')
     a = p.parse_args()
     case = resolve_probe_case(a.project, '008_asr_20261022T105518Z_946eac')
     cycles = a.project / 'outputs/optimization_cycles'
@@ -28,7 +28,7 @@ def main():
     if not a.worker:
         if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
             raise ValueError('Independent checkout must be clean')
-        round_id={'input':'38','focus':'39','permutation':'40','observation':'41'}[a.experiment]
+        round_id={'input':'38','focus':'39','permutation':'40','observation':'41','content_guard':'42'}[a.experiment]
         state = cycles / ('round'+round_id+'_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
         with lock.open('x') as f:
             json.dump({'state': str(state)}, f)
@@ -67,17 +67,18 @@ def main():
         write_json(evidence/'provenance.json',provenance)
         env=os.environ.copy();env['MAVIS_ENV_FILE']=str(a.project/'.env')
         executions=[('full_frame',full)] if a.experiment!='input' else [('frozen_crop',case),('full_frame',full)]
-        comparison={'input':'chain_regression','focus':'chain_focus','permutation':'chain_permutation','observation':'chain_observation'}[a.experiment]
+        comparison={'input':'chain_regression','focus':'chain_focus','permutation':'chain_permutation','observation':'chain_observation','content_guard':'chain_content_guard'}[a.experiment]
         for name, source in executions:
             with (state/(name+'.log')).open('wb') as log:
                 subprocess.run([sys.executable,str(ROOT/'scripts/run_fragment_boundary_comparison.py'),
                                 '--case',str(source),'--output-root',str(state/'results'/name),
                                 '--comparison',comparison],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,
-                               timeout={'input':680,'focus':1250,'permutation':1900,'observation':1250}[a.experiment],check=True)
+                               timeout={'input':680,'focus':1250,'permutation':1900,'observation':1250,'content_guard':1250}[a.experiment],check=True)
         artifacts={x.relative_to(state).as_posix():sha256(x) for x in state.rglob('*')
                    if x.is_file() and x.suffix not in ['.log'] and x.name not in ['run.json','launch.json']}
         write_json(state/'evidence_manifest.json',dict(head=r['head'],artifact_sha256=artifacts,
-                   scope=('candidate-blind original-image observation and deterministic existing-candidate matching' if a.experiment=='observation' else
+                   scope=('shared fresh selection; independent content point observation and deterministic outside-page veto' if a.experiment=='content_guard' else
+                          'candidate-blind original-image observation and deterministic existing-candidate matching' if a.experiment=='observation' else
                           'same fresh candidates, independently reversed labels and positions' if a.experiment=='permutation' else
                           'same fresh candidates and full frame, paired candidate-sheet field of view' if a.experiment=='focus' else
                           'input correction, same historical selected frame; not new frame selection or HTML evaluation')))
