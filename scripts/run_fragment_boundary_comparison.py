@@ -27,13 +27,13 @@ def main():
     from openai import OpenAI
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',type=Path,required=True);parser.add_argument('--output-root',type=Path,required=True)
-    parser.add_argument('--comparison',choices=['fragments','retention','identity'],default='fragments')
+    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment'],default='fragments')
     args=parser.parse_args();inputs=load_inputs(args.case.resolve(),'M2')
     batch=args.output_root.resolve()/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8])
     batch.mkdir(parents=True)
     image_path=batch/'image.jpg';shutil.copyfile(inputs['image'],image_path)
     image=cv2.imread(str(image_path));h,w=image.shape[:2]
-    if args.comparison in {'retention','identity'}:
+    if args.comparison in {'retention','identity','recruitment'}:
         from unittest.mock import patch
         raw=cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD).detect(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY))[0]
         write_json(batch/'raw_lines.json',[] if raw is None else raw.tolist())
@@ -60,6 +60,13 @@ def main():
             shared=arms['spatial_retention_v1']
             write_json(batch/'shared_identity_candidates.json',shared)
             arms={'free_page_selection':shared,'page_scope_v1':shared}
+        if args.comparison=='recruitment':
+            from src.utils.endpoint_fragment_recruitment import recruit_endpoint_fragments
+            base_support=aggregate_fragments(spatial,w,h)
+            recruited=recruit_endpoint_fragments(base_support,spatial,[] if raw is None else [list(map(float,r[0])) for r in raw],w,h)
+            write_json(batch/'recruited_support.json',recruited)
+            arms={'existing_support':arms['spatial_retention_v1'],
+                  'endpoint_recruitment_v1':closed_candidates(recruited['lines'],w,h,fragment_mode=True)}
     else:
         lines=detect_line_candidates(image)
         support=aggregate_fragments(lines,w,h);write_json(batch/'fragment_support.json',support)

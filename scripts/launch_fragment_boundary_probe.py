@@ -17,7 +17,7 @@ def main():
     p.add_argument('--project',type=Path,required=True)
     p.add_argument('--state',type=Path)
     p.add_argument('--worker',action='store_true')
-    p.add_argument('--comparison',choices=['fragments','retention','identity'],default='fragments')
+    p.add_argument('--comparison',choices=['fragments','retention','identity','recruitment'],default='fragments')
     a=p.parse_args()
     cycles=a.project/'outputs/optimization_cycles'
     lock=cycles/'active_generation.lock'
@@ -25,7 +25,7 @@ def main():
         head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
         if subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip():
             raise ValueError('Independent checkout must be clean')
-        round_id={'retention':'31','identity':'32','fragments':'29'}[a.comparison]
+        round_id={'retention':'31','identity':'32','fragments':'29','recruitment':'33'}[a.comparison]
         state=cycles/('round'+round_id+'_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
         with lock.open('x') as f:json.dump({'state':str(state)},f)
         state.mkdir(exist_ok=False)
