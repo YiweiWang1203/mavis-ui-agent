@@ -27,13 +27,13 @@ def main():
     from openai import OpenAI
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',type=Path,required=True);parser.add_argument('--output-root',type=Path,required=True)
-    parser.add_argument('--comparison',choices=['fragments','retention'],default='fragments')
+    parser.add_argument('--comparison',choices=['fragments','retention','identity'],default='fragments')
     args=parser.parse_args();inputs=load_inputs(args.case.resolve(),'M2')
     batch=args.output_root.resolve()/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8])
     batch.mkdir(parents=True)
     image_path=batch/'image.jpg';shutil.copyfile(inputs['image'],image_path)
     image=cv2.imread(str(image_path));h,w=image.shape[:2]
-    if args.comparison=='retention':
+    if args.comparison in {'retention','identity'}:
         from unittest.mock import patch
         raw=cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD).detect(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY))[0]
         write_json(batch/'raw_lines.json',[] if raw is None else raw.tolist())
@@ -55,6 +55,11 @@ def main():
             for line in source:
                 a=line['endpoints'];cv2.line(overlay,(round(a[0]),round(a[1])),(round(a[2]),round(a[3])),(0,0,255),1)
             cv2.imwrite(str(batch/(name+'_lines_overlay.jpg')),overlay)
+        if args.comparison=='identity':
+            # Both semantic arms see this one freshly generated candidate state.
+            shared=arms['spatial_retention_v1']
+            write_json(batch/'shared_identity_candidates.json',shared)
+            arms={'free_page_selection':shared,'page_scope_v1':shared}
     else:
         lines=detect_line_candidates(image)
         support=aggregate_fragments(lines,w,h);write_json(batch/'fragment_support.json',support)
@@ -100,6 +105,17 @@ def main():
         summary=dict(model=model,status='failed',html_expected=False,behavior_evaluated=False)
         common='Locate the OUTER HAND-DRAWN UI PAGE, not paper, desk, photo border, sidebar or input box. Portrait photograph can contain landscape desktop page. Observe original image; do not assume whole-image bounds. If uncertain return unresolved, never invent closure. No elements or regions in this call. '
         prompt=common+'Choose exactly one proposed closed quadrilateral that is the outer HAND-DRAWN UI PAGE. Red quadrilaterals are geometry proposals, not answers; ranking does not prove identity. Reject paper/table edges and smaller internal regions. Never invent or edit coordinates or combine candidates. Return only {"candidate_id":"page_candidate_N","unresolved_reason":null}, or candidate_id:null with a concrete reason if none is correct. First image original; second contact sheet of proposals.'
+        if arm=='page_scope_v1':
+            prompt=common+('Evaluate the SCOPE of every candidate before selecting. A closed sidebar, message box, input box or subregion is not the page. '
+                'Compare the original image and all quadrilaterals. For each candidate identify any visible major UI content outside it. '
+                'No candidate containing only one region may be selected as the whole page. Paper and table are different targets. '
+                'Return {"candidate_id":string|null,"unresolved_reason":string|null,"assessments":['
+                '{"candidate_id":string,"scope":"whole_ui_page|internal_region|paper_or_background|uncertain",'
+                '"outside_ui_evidence":["describe actual visible UI outside this candidate, or empty if none"],'
+                '"boundary_evidence":"describe its visible boundary and why it belongs to this scope"}]}. '
+                'Assess every supplied ID exactly once. Select only whole_ui_page with empty outside_ui_evidence. '
+                'If no full-page candidate exists, candidate_id:null and explain; do not choose the least bad candidate. '
+                'Do not edit coordinates, create a new ID or infer hidden lines. First image original; second candidate sheet.')
         compact=[{k:r[k] for k in ['id','side_ids','area_fraction','projected_support']} for r in proposals['candidates']]
         content=[{'type':'text','text':json.dumps({'intent':intent,'image_size':[w,h],'candidates':compact},ensure_ascii=False)},image_part(image_path)]
         if compact:content.append(image_part(batch/(arm+'_sheet.jpg')))
@@ -112,7 +128,11 @@ def main():
                 if response.choices[0].finish_reason=='length':raise ValueError('Truncated; no retry')
                 declaration=parse_spatial_response(response.choices[0].message.content)
             write_json(out/'proposal.json',declaration)
-            result=select_candidate(proposals,declaration)
+            if arm=='page_scope_v1':
+                from src.utils.page_scope_contract import select_with_scope
+                result=select_with_scope(proposals,declaration)
+            else:
+                result=select_candidate(proposals,declaration)
             write_json(out/'boundary.json',result);summary['status']=result['status']
             if result.get('quad'):
                 preview=image.copy();quad=np.array(result['quad'],dtype=np.float32)
