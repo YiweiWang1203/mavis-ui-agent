@@ -27,15 +27,40 @@ def main():
     from openai import OpenAI
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',type=Path,required=True);parser.add_argument('--output-root',type=Path,required=True)
+    parser.add_argument('--comparison',choices=['fragments','retention'],default='fragments')
     args=parser.parse_args();inputs=load_inputs(args.case.resolve(),'M2')
     batch=args.output_root.resolve()/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8])
     batch.mkdir(parents=True)
     image_path=batch/'image.jpg';shutil.copyfile(inputs['image'],image_path)
     image=cv2.imread(str(image_path));h,w=image.shape[:2]
-    lines=detect_line_candidates(image);write_json(batch/'line_candidates.json',lines)
-    support=aggregate_fragments(lines,w,h);write_json(batch/'fragment_support.json',support)
-    arms={'single_segment_boundary':closed_candidates(lines,w,h),
-          'fragment_union_boundary':closed_candidates(support['lines'],w,h,fragment_mode=True)}
+    if args.comparison=='retention':
+        from unittest.mock import patch
+        raw=cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD).detect(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY))[0]
+        write_json(batch/'raw_lines.json',[] if raw is None else raw.tolist())
+        class FrozenDetector:
+            def detect(self,gray):return (raw,)
+        with patch.object(cv2,'createLineSegmentDetector',return_value=FrozenDetector()):
+            lines=detect_line_candidates(image)
+            spatial=detect_line_candidates(image,selection='spatial_v1')
+        if any(sum(r['orientation']==o for r in lines)!=sum(r['orientation']==o for r in spatial)
+               for o in ['horizontal','vertical']):
+            raise ValueError('Retention comparison requires equal actual orientation counts')
+        arms={}
+        for name,source in [('length_retention',lines),('spatial_retention_v1',spatial)]:
+            write_json(batch/(name+'_lines.json'),source)
+            support=aggregate_fragments(source,w,h)
+            write_json(batch/(name+'_support.json'),support)
+            arms[name]=closed_candidates(support['lines'],w,h,fragment_mode=True)
+            overlay=image.copy()
+            for line in source:
+                a=line['endpoints'];cv2.line(overlay,(round(a[0]),round(a[1])),(round(a[2]),round(a[3])),(0,0,255),1)
+            cv2.imwrite(str(batch/(name+'_lines_overlay.jpg')),overlay)
+    else:
+        lines=detect_line_candidates(image)
+        support=aggregate_fragments(lines,w,h);write_json(batch/'fragment_support.json',support)
+        arms={'single_segment_boundary':closed_candidates(lines,w,h),
+              'fragment_union_boundary':closed_candidates(support['lines'],w,h,fragment_mode=True)}
+    write_json(batch/'line_candidates.json',lines)
     for arm,proposals in arms.items():
         write_json(batch/(arm+'_candidates.json'),proposals)
         tiles=[]
@@ -64,7 +89,7 @@ def main():
     intent=inputs['prompt']+'\n'+inputs['transcript']
     def image_part(path):return {'type':'image_url','image_url':{'url':'data:image/jpeg;base64,'+base64.b64encode(path.read_bytes()).decode('ascii')}}
     manifest=dict(provenance,status='started',generation_kind='fresh_boundary_only_comparison',runs=[],
-        input_sha256={k:sha256(v) for k,v in inputs['files'].items()},max_calls=2,model=model,empty_candidate_precondition='Skip equally for both groups; no semantic score when no candidates',
+        input_sha256={k:sha256(v) for k,v in inputs['files'].items()},comparison=args.comparison,max_calls=2,model=model,empty_candidate_precondition='Skip equally for both groups; no semantic score when no candidates',
         runtime={'python_executable':sys.executable,'python_version':sys.version,'cv2_path':cv2.__file__,'numpy_path':np.__file__},
         max_tokens_per_stage=8192,timeout_seconds=600,max_retries=0,
         limits='Boundary localization only; no HTML, task functionality or whole-layout improvement scores.')

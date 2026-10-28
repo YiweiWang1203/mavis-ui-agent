@@ -51,7 +51,8 @@ def compile_boundary(lines,selection,width,height):
         'limits':'Detected line references do not prove semantic page identity or complete visibility.'}
 
 
-def detect_line_candidates(image):
+def detect_line_candidates(image, selection='length'):
+    if selection not in {'length','spatial_v1'}:raise ValueError('Unknown line retention policy')
     import cv2
     gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
     h,w=gray.shape
@@ -64,6 +65,9 @@ def detect_line_candidates(image):
         angle=abs(math.degrees(math.atan2(dy,dx)))%180
         orientation='horizontal' if min(angle,180-angle)<20 else 'vertical' if abs(angle-90)<20 else None
         if orientation:retained.append({'endpoints':[x1,y1,x2,y2],'length':length,'orientation':orientation})
+    if selection=='spatial_v1':
+        from src.utils.spatial_line_retention import spatial_retention
+        return spatial_retention(retained,w,h)
     result=[]
     for r in sorted(retained,key=lambda r:-r['length']):
         a=r['endpoints'];mid=[(a[0]+a[2])/2,(a[1]+a[3])/2]
