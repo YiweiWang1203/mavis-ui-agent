@@ -44,10 +44,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--case', type=Path, required=True)
     parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1'), default='semantic-page-v1')
+    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1'), default='semantic-page-v1')
     args = parser.parse_args()
-    projection = args.candidate_mode in {'projection-flow-v1', 'projection-input-slots-v1'}
+    projection = args.candidate_mode in {'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1'}
     role_anchor = args.candidate_mode == 'projection-input-slots-v1'
+    footprints = args.candidate_mode == 'projection-button-footprints-v1'
+    paired_projection = role_anchor or footprints
     cap = 2 if projection else 3
     inputs = load_inputs(args.case.resolve(), 'M2')
     state_dir = args.state.resolve()
@@ -94,7 +96,7 @@ def main():
         'max_tokens_per_stage': 8192, 'timeout_seconds': 600, 'max_retries': 0,
         'baseline_status': 'not_generated', 'candidate_status': 'not_generated',
         'device_request_added_equally': True, 'output_html_repair': False, 'behavior_evaluated': False}
-    if args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1'}:
+    if projection or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
         manifest['call_accounting'] = {'physical_cap': cap, 'shared_vision_and_architecture': 2,
             'baseline_exclusive': 0, 'candidate_exclusive': 0 if projection else 1, 'baseline_effective': 2, 'candidate_effective': 2 if projection else 3}
     write_json(batch / 'batch.json', manifest)
@@ -103,9 +105,9 @@ def main():
             code = execute(inputs, 'M2', upstream, shared, model)
             if isinstance(code, str) and '<html' in code.lower() and '</html' in code.lower():
                 shutil.copyfile(shared / 'ui_state.json', baseline / 'ui_state.json')
-                if not role_anchor:
+                if not paired_projection:
                     (baseline / 'final_code.html').write_text(code, encoding='utf-8')
-                manifest['baseline_status'] = 'projection_baseline_pending' if role_anchor else 'html_generated_pending_browser_review'
+                manifest['baseline_status'] = 'projection_baseline_pending' if paired_projection else 'html_generated_pending_browser_review'
             else:
                 manifest['baseline_status'] = 'generation_failed'
         except Exception as exc:
@@ -129,7 +131,7 @@ def main():
         manifest['shared_vision_sha256'] = sha256(vision_path)
         manifest['same_image_url_sha256'] = image_hash
         planned.stage = args.candidate_mode
-        if args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1'}:
+        if projection or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
             from src.agents.frozen_region_planner import generate_frozen_region_plan, frozen_inventory, inventory_hash
             if not (baseline / 'ui_state.json').is_file():
                 raise ValueError('Fresh baseline semantic inventory required; no historical fallback')
@@ -143,7 +145,20 @@ def main():
             if projection:
                 from src.utils.projection_flow_layout import compile_projection_flow
                 layout_args = dict(request=inputs['prompt'], speech=inputs['transcript'], frame=frame, viewport=viewport)
-                if role_anchor:
+                if footprints:
+                    projected_baseline = compile_projection_flow(baseline_state, vision, **layout_args)
+                    write_json(baseline / 'ui_state.json', projected_baseline)
+                    (baseline / 'final_code.html').write_text(render_controlled_components(projected_baseline), encoding='utf-8')
+                    manifest['baseline_status'] = 'html_generated_pending_browser_review'
+                    state = compile_projection_flow(baseline_state, vision, button_footprints=True, **layout_args)
+                    if frozen_inventory(state) != frozen_inventory(projected_baseline):
+                        raise ValueError('Footprint comparison changed semantic inventory')
+                    if state['page_meta']['symbolic_flow'] != projected_baseline['page_meta']['symbolic_flow']:
+                        raise ValueError('Footprint comparison changed allocated regions')
+                    manifest['baseline_layout_mode'] = 'projection-flow-v1'
+                    manifest['allowed_layout_delta'] = 'button footprints within unchanged allocated regions only'
+                    write_json(candidate / 'button_footprints.json', state['page_meta']['button_footprints'])
+                elif role_anchor:
                     from src.utils.editable_role_anchor import compile_unique_editable_role
                     projected_baseline = compile_projection_flow(baseline_state, vision, **layout_args)
                     write_json(baseline / 'ui_state.json', projected_baseline)
@@ -187,7 +202,7 @@ def main():
         request_elapsed_seconds=sum(c['elapsed_seconds'] for c in calls),
         finished_utc=datetime.now(timezone.utc).isoformat(),
         runs=[{'folder': str(baseline)}, {'folder': str(candidate)}])
-    frozen = args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1'}
+    frozen = projection or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}
     if projection:
         manifest['call_accounting'] = {'physical_cap': 2, 'shared_vision_and_architecture': 2, 'baseline_exclusive': 0, 'candidate_exclusive': 0, 'baseline_effective': 2, 'candidate_effective': 2}
     manifest['planned_call_accounting'] = manifest['call_accounting']

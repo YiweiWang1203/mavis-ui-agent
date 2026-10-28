@@ -21,7 +21,7 @@ const sha=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'
   await page.goto(pathToFileURL(path.resolve(html)).href,{waitUntil:'networkidle',timeout:30000});
   const elements=await page.evaluate(els=>els.map(e=>{
    const nodes=[...document.querySelectorAll('[id]')].filter(n=>n.id===e.id),n=nodes[0],r=n?.getBoundingClientRect(),css=n?getComputedStyle(n):null;
-   return {id:e.id,text:e.text,action:e.rpa_action,type:e.type,parent_id:e.parent_id,count:nodes.length,tag:n?.tagName,dom_parent:n?.getAttribute('data-parent-id'),actual_parent:n?.parentElement?.id,appearance:css?{background:css.backgroundColor,border:css.borderTopWidth,border_style:css.borderTopStyle,color:css.color}:null,rect:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null};
+   return {id:e.id,text:e.text,action:e.rpa_action,type:e.type,parent_id:e.parent_id,count:nodes.length,tag:n?.tagName,dom_parent:n?.getAttribute('data-parent-id'),actual_parent:n?.parentElement?.id,appearance:css?{background:css.backgroundColor,border:css.borderTopWidth,border_style:css.borderTopStyle,color:css.color}:null,content_extent:n?{scroll_width:n.scrollWidth,client_width:n.clientWidth,scroll_height:n.scrollHeight,client_height:n.clientHeight,overflow:n.scrollWidth>n.clientWidth+1||n.scrollHeight>n.clientHeight+1}:null,rect:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null};
   }),state.elements);
   const relations=[];
   for(const label of (profile==='ride008'?['现在','预约','菜单','主界面','返回']:[])){

@@ -1,6 +1,7 @@
 """Compile sourced grouping/order to pixels without model-authored coordinates."""
 import copy
 import math
+import unicodedata
 
 from src.agents.frozen_region_planner import compile_frozen_regions, frozen_inventory
 from src.utils.text_evidence_contract import source_spans
@@ -58,7 +59,7 @@ def expand_flat_program(program):
     return {'version': 'symbolic-flow-v1', 'root': root}
 
 
-def compile_symbolic_flow(tree, state, vision, *, request, speech, frame, viewport):
+def compile_symbolic_flow(tree, state, vision, *, request, speech, frame, viewport, button_footprints=False):
     if not isinstance(tree, dict) or set(tree) != {'version', 'root'} or tree['version'] != 'symbolic-flow-v1':
         raise ValueError('Expected symbolic-flow-v1 with root only')
     inventory = {e['id']: e for e in frozen_inventory(state)}
@@ -115,6 +116,7 @@ def compile_symbolic_flow(tree, state, vision, *, request, speech, frame, viewpo
     root_id = measurements[id(root)][0]
     plan = {'version': 'region-local-v1', 'root_region_id': root_id, 'regions': [], 'placements': []}
     allocation = []
+    footprints = []
 
     def place(node, bounds, parent=None, local=None):
         key, size = measurements[id(node)]
@@ -124,8 +126,21 @@ def compile_symbolic_flow(tree, state, vision, *, request, speech, frame, viewpo
                 'reason': 'Declared symbolic grouping with uncalibrated flex weights and code minimum/gap defaults: ' + node['reason']})
         allocation.append({'id': key, 'bounds': bounds, 'minimum': size})
         if node['kind'] == 'entity':
+            eid = node['entity_id']
+            local_box = [0, 0, 1, 1]
+            if button_footprints and inventory[eid]['type'] == 'button':
+                width, height = bounds[2]-bounds[0], bounds[3]-bounds[1]
+                caption = str(inventory[eid].get('text') or '')
+                # Explicit prototype defaults, not source geometry or font measurement.
+                preferred_width = max(48, 24 + sum(14 if unicodedata.east_asian_width(c) in {'W', 'F'} else 8 for c in caption))
+                actual_width, actual_height = min(width, preferred_width), min(height, 48)
+                dx, dy = (1-actual_width/width)/2, (1-actual_height/height)/2
+                local_box = [round(v,12) for v in [dx,dy,1-dx,1-dy]]
+                footprints.append({'entity_id': eid, 'allocated_bounds': list(bounds),
+                    'preferred_width_px': preferred_width, 'preferred_height_px': 48,
+                    'local_bbox': local_box, 'caption_width_is_estimate': True})
             plan['placements'].append({'entity_id': node['entity_id'], 'region_id': key,
-                'coordinate_space': 'region_local', 'bbox': [0, 0, 1, 1],
+                'coordinate_space': 'region_local', 'bbox': local_box,
                 'evidence_refs': copy.deepcopy(node['evidence_refs']), 'reason': node['reason']})
             return
         axis = 0 if node['axis'] == 'row' else 1
@@ -156,4 +171,9 @@ def compile_symbolic_flow(tree, state, vision, *, request, speech, frame, viewpo
         'gap_px': gap, 'weight_meaning': 'remaining_space_after_child_minima_and_gaps',
         'proportions_calibrated': False, 'defaults_are_design_not_measurement': True,
         'allocations': allocation, 'source_tree': copy.deepcopy(tree)}
+    if button_footprints:
+        result['page_meta']['button_footprints'] = {'version': 'atomic-button-footprint-v1',
+            'policy_is_design_default_not_observation': True, 'alignment': 'center',
+            'preferred_height_px': 48, 'wide_character_px': 14, 'narrow_character_px': 8,
+            'horizontal_padding_px': 24, 'minimum_preferred_width_px': 48, 'placements': footprints}
     return result
