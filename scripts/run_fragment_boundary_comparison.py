@@ -27,13 +27,13 @@ def main():
     from openai import OpenAI
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',type=Path,required=True);parser.add_argument('--output-root',type=Path,required=True)
-    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment','chain_identity','chain_regression','chain_focus'],default='fragments')
+    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment','chain_identity','chain_regression','chain_focus','chain_permutation'],default='fragments')
     args=parser.parse_args();inputs=load_inputs(args.case.resolve(),'M2')
     batch=args.output_root.resolve()/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8])
     batch.mkdir(parents=True)
     image_path=batch/'image.jpg';shutil.copyfile(inputs['image'],image_path)
     image=cv2.imread(str(image_path));h,w=image.shape[:2]
-    if args.comparison in {'retention','identity','recruitment','chain_identity','chain_regression','chain_focus'}:
+    if args.comparison in {'retention','identity','recruitment','chain_identity','chain_regression','chain_focus','chain_permutation'}:
         from unittest.mock import patch
         raw=cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD).detect(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY))[0]
         write_json(batch/'raw_lines.json',[] if raw is None else raw.tolist())
@@ -67,7 +67,7 @@ def main():
             write_json(batch/'recruited_support.json',recruited)
             arms={'existing_support':arms['spatial_retention_v1'],
                   'endpoint_recruitment_v1':closed_candidates(recruited['lines'],w,h,fragment_mode=True)}
-        if args.comparison in {'chain_identity','chain_regression','chain_focus'}:
+        if args.comparison in {'chain_identity','chain_regression','chain_focus','chain_permutation'}:
             from src.utils.bounded_fragment_chains import recruit_fragment_chains
             from src.utils.candidate_containment_context import shared_candidate_order,containment_context
             base_support=aggregate_fragments(spatial,w,h)
@@ -82,6 +82,10 @@ def main():
             arms={'free_page_selection':shared,'containment_context_v1':shared}
             if args.comparison=='chain_regression':arms={'free_page_selection':shared}
             if args.comparison=='chain_focus':arms={'baseline_sheet':shared,'focus_sheet':shared}
+            if args.comparison=='chain_permutation':
+                from src.utils.candidate_permutation import permutation_arms
+                arms,permutation_mapping=permutation_arms(shared)
+                write_json(batch/'permutation_mapping.json',permutation_mapping)
     else:
         lines=detect_line_candidates(image)
         support=aggregate_fragments(lines,w,h);write_json(batch/'fragment_support.json',support)
@@ -116,7 +120,7 @@ def main():
     url=urlsplit(endpoint or '')
     if not key or url.scheme!='https' or not url.netloc or url.username or url.password or url.query or url.fragment:
         raise ValueError('Existing credential-free HTTPS endpoint required')
-    call_limit=1 if args.comparison=='chain_regression' else 2
+    call_limit=3 if args.comparison=='chain_permutation' else (1 if args.comparison=='chain_regression' else 2)
     provider=CappedProvider(OpenAI(api_key=key,base_url=endpoint,max_retries=0,timeout=600),limit=call_limit)
     model='Qwen/Qwen3-VL-8B-Instruct';provenance=source_record()
     intent=inputs['prompt']+'\n'+inputs['transcript']
@@ -177,7 +181,7 @@ def main():
                 cv2.polylines(preview,[np.round(quad).astype(np.int32)],True,(0,0,255),2)
                 cv2.imwrite(str(out/'boundary_overlay.jpg'),preview)
                 # Diagnostic page mapping, not a generated UI or perspective-accuracy assertion.
-                if args.comparison not in {'chain_regression','chain_focus'}:
+                if args.comparison not in {'chain_regression','chain_focus','chain_permutation'}:
                     dst=np.array([[0,0],[1439,0],[1439,899],[0,899]],dtype=np.float32)
                     mapped=cv2.warpPerspective(image,cv2.getPerspectiveTransform(quad,dst),(1440,900))
                     cv2.imwrite(str(out/'mapped_page_1440x900.jpg'),mapped)
