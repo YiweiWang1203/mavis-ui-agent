@@ -19,7 +19,7 @@ def box(value):
 
 
 @traced_stage('architect.identity_contract')
-def build_structure(ui_state,vision_elements):
+def build_structure(ui_state,vision_elements, *, coordinate_contract=None):
     result=copy.deepcopy(ui_state)
     view=result.get('page_meta',{}).get('viewport',{})
     if not all(isinstance(view.get(k),int) and not isinstance(view.get(k),bool) and view[k]>0 for k in ('width','height')):
@@ -36,11 +36,13 @@ def build_structure(ui_state,vision_elements):
         if vid is not None:
             if vid not in visual or vid in used:raise ValueError('Invalid or reused vision source')
             used.add(vid);e['id']=vid;e['vision_id']=vid
-            b=visual[vid]['bbox'];w,h=view['width'],view['height']
-            e.setdefault('spatial_info',{})['bbox']=box([b['x_min']*w,b['y_min']*h,b['x_max']*w,b['y_max']*h])
+            if coordinate_contract is None:
+                b=visual[vid]['bbox'];w,h=view['width'],view['height']
+                e.setdefault('spatial_info',{})['bbox']=box([b['x_min']*w,b['y_min']*h,b['x_max']*w,b['y_max']*h])
             e['source_refs']=[{'source':'vision','id':vid}]
         elif e.get('origin')=='spoken' and old.startswith('u_'):
-            e.setdefault('spatial_info',{})['bbox']=box(e.get('spatial_info',{}).get('bbox'))
+            if coordinate_contract is None:
+                e.setdefault('spatial_info',{})['bbox']=box(e.get('spatial_info',{}).get('bbox'))
             e['source_refs']=[{'source':'spoken_intent','id':old}]
         else:raise ValueError('Element has no explicit source')
         aliases[old]=e['id'];output.append(e)
@@ -50,7 +52,7 @@ def build_structure(ui_state,vision_elements):
             output.append({'id':vid,'vision_id':vid,'origin':'vision','type':v['type'],
                 'text':v.get('text') or '', 'parent_id':v.get('parent_id'), 'rpa_action':'',
                 'source_refs':[{'source':'vision','id':vid}],
-                'spatial_info':{'bbox':box([b['x_min']*w,b['y_min']*h,b['x_max']*w,b['y_max']*h])}})
+                'spatial_info':{} if coordinate_contract is not None else {'bbox':box([b['x_min']*w,b['y_min']*h,b['x_max']*w,b['y_max']*h])}})
     indexed={e['id']:e for e in output}
     if len(indexed)!=len(output):raise ValueError('Canonical identity collision')
     for e in output:
@@ -67,6 +69,9 @@ def build_structure(ui_state,vision_elements):
     result['elements']=output
     result['page_meta']['structure_contract']={'version':'hierarchy-v1','visual_sources':len(visual),
         'model_sources':len(used),'fallback_sources':len(visual)-len(used)}
+    if coordinate_contract is not None:
+        from src.utils.coordinate_contract import apply_coordinate_contract
+        result = apply_coordinate_contract(result, vision_elements, coordinate_contract)
     return result
 
 
@@ -76,6 +81,8 @@ def contains(a,b):
 
 @traced_stage('architect.hierarchy_layout')
 def solve_hierarchy(ui_state):
+    if ui_state.get('page_meta',{}).get('coordinate_contract',{}).get('version') == 'evidence-layout-v1':
+        raise ValueError('Explicit layout plan requires a dedicated compiler; legacy hierarchy fitting is not permitted')
     result=copy.deepcopy(ui_state);view=result['page_meta']['viewport'];index={e['id']:e for e in result['elements']}
     root=[0,0,view['width'],view['height']];done=set();decisions=[]
     mode=os.getenv('UI_HIERARCHY_LAYOUT_MODE','baseline')
