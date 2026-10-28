@@ -3,6 +3,9 @@ import copy
 import re
 from src.utils.pipeline_trace import traced_stage
 
+EDITABLE_BEHAVIOR_PATTERN = r'输入文字|输入文本|输入内容|填写文字|键入文字|can (?:enter|type)|editable (?:text|input)'
+NEGATIVE_INPUT_PATTERN = r'不能|不可以|不可输入|不需要输入|无需输入|只读|read.only|cannot|not editable'
+
 
 @traced_stage('architect.spoken_input_evidence')
 def compile_spoken_inputs(state, vision, intent):
@@ -28,8 +31,8 @@ def compile_spoken_inputs(state, vision, intent):
         elif not isinstance(q,str) or not 2<=len(q)<=400 or q not in intent:reason='source_quote_not_found'
         elif not label or label not in q or (e.get('text') or '')!=label:reason='literal_label_not_anchored'
         elif sum((v.get('text') or '')==label for v in visual.values())!=1:reason='ambiguous_literal_label'
-        elif re.search(r'不能|不可以|不可输入|不需要输入|无需输入|只读|read.only|cannot|not editable',q,re.I):reason='negative_or_readonly_source'
-        elif not re.search(r'输入文字|输入文本|输入内容|填写文字|键入文字|can (?:enter|type)|editable (?:text|input)',q,re.I):reason='editable_behavior_not_anchored'
+        elif re.search(NEGATIVE_INPUT_PATTERN,q,re.I):reason='negative_or_readonly_source'
+        elif not re.search(EDITABLE_BEHAVIOR_PATTERN,q,re.I):reason='editable_behavior_not_anchored'
         if reason:
             unresolved.append(dict(p,reason=reason));continue
         e['type']='input'

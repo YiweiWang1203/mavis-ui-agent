@@ -54,6 +54,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case', required=True, type=Path)
     parser.add_argument('--output-root', required=True, type=Path)
+    parser.add_argument('--audit-mode', choices=['input_audit_v1', 'requirement_slots_v1'], default='input_audit_v1')
     args = parser.parse_args()
     inputs = load_inputs(args.case.resolve(), 'M2')
     provenance = source_record()
@@ -85,9 +86,10 @@ def main():
     from openai import OpenAI
     gate = CappedProvider(OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600))
     client = BudgetClient(gate, shared)
-    manifest = dict(provenance, status='started', specialist_mode='input_audit_v1', call_limit=3, shared_calls=2,
-        effective_calls={'baseline': 2, 'input_audit': 3},
-        budget_note='shared new vision+architect; candidate adds one text-slot audit; not equal-call arms; relation specialist off in both',
+    arm_name = 'input_requirement_slots' if args.audit_mode == 'requirement_slots_v1' else 'input_audit'
+    manifest = dict(provenance, status='started', specialist_mode=args.audit_mode, call_limit=3, shared_calls=2,
+        effective_calls={'baseline': 2, arm_name: 3},
+        budget_note='shared new vision+architect; candidate adds one declared evidence audit; not equal-call arms; relation specialist off in both',
         input_sha256=hashes, runs=[])
     write_json(batch / 'batch.json', manifest)
     print('Batch:', batch, flush=True)
@@ -107,7 +109,7 @@ def main():
         shared_elapsed_seconds=shared_elapsed, shared_artifact_sha256={p.relative_to(shared).as_posix():sha256(p) for p in shared.rglob('*') if p.is_file()})
     baseline = persist_arm(dest / 'baseline', baseline_state, baseline_code, dict(common, arm='baseline'), [])
     manifest['runs'].append({'folder': str(dest / 'baseline'), 'status': baseline['status']})
-    candidate_folder = dest / 'input_audit'; candidate_folder.mkdir()
+    candidate_folder = dest / arm_name; candidate_folder.mkdir()
     candidate_client = BudgetClient(gate, candidate_folder)
     candidate_state = {'error': 'shared_upstream_unavailable'}; candidate_code = None
     candidate_start = time.monotonic()
@@ -122,7 +124,11 @@ def main():
         from src.renderers.controlled_components import render_controlled_components
         intent = inputs['prompt'] + '\n\n[Spoken transcript]\n' + inputs['transcript']
         with PipelineTrace(candidate_folder / 'pipeline_trace', {'entrypoint': 'fresh_shared_upstream_input_audit', 'preprocessing': 'not_executed_frozen_assets'}):
-            proposal = audit_input_semantics(copy.deepcopy(raw), vision, intent, model, candidate_client)
+            if args.audit_mode == 'requirement_slots_v1':
+                from src.agents.input_requirement_binder import bind_input_requirements
+                proposal = bind_input_requirements(copy.deepcopy(raw), vision, intent, model, candidate_client)
+            else:
+                proposal = audit_input_semantics(copy.deepcopy(raw), vision, intent, model, candidate_client)
             if proposal['elements'] != raw['elements']:
                 raise RuntimeError('Specialist changed source nodes')
             write_json(candidate_folder / 'specialist_proposal.json', proposal)
@@ -134,7 +140,7 @@ def main():
         candidate_state = {'error': type(error).__name__}
         write_json(candidate_folder / 'failure.json', {'error_type': type(error).__name__})
     candidate = persist_arm(candidate_folder, candidate_state, candidate_code,
-        dict(common, arm='input_audit', generation_kind='fresh_shared_upstream_input_audit', source_nodes_edited_by_specialist=False, extra_elapsed_seconds=time.monotonic()-candidate_start), candidate_client.calls)
+        dict(common, arm=arm_name, audit_mode=args.audit_mode, generation_kind='fresh_shared_upstream_input_audit', source_nodes_edited_by_specialist=False, extra_elapsed_seconds=time.monotonic()-candidate_start), candidate_client.calls)
     candidate.update(generation_kind='fresh_shared_upstream_input_audit',
         source_nodes_edited_by_specialist=False, semantic_type_compilation_enabled=True)
     write_json(candidate_folder / 'run_summary.json', candidate)
