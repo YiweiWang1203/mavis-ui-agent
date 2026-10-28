@@ -27,13 +27,13 @@ def main():
     from openai import OpenAI
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',type=Path,required=True);parser.add_argument('--output-root',type=Path,required=True)
-    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment','chain_identity','chain_regression'],default='fragments')
+    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment','chain_identity','chain_regression','chain_focus'],default='fragments')
     args=parser.parse_args();inputs=load_inputs(args.case.resolve(),'M2')
     batch=args.output_root.resolve()/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8])
     batch.mkdir(parents=True)
     image_path=batch/'image.jpg';shutil.copyfile(inputs['image'],image_path)
     image=cv2.imread(str(image_path));h,w=image.shape[:2]
-    if args.comparison in {'retention','identity','recruitment','chain_identity','chain_regression'}:
+    if args.comparison in {'retention','identity','recruitment','chain_identity','chain_regression','chain_focus'}:
         from unittest.mock import patch
         raw=cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD).detect(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY))[0]
         write_json(batch/'raw_lines.json',[] if raw is None else raw.tolist())
@@ -67,7 +67,7 @@ def main():
             write_json(batch/'recruited_support.json',recruited)
             arms={'existing_support':arms['spatial_retention_v1'],
                   'endpoint_recruitment_v1':closed_candidates(recruited['lines'],w,h,fragment_mode=True)}
-        if args.comparison in {'chain_identity','chain_regression'}:
+        if args.comparison in {'chain_identity','chain_regression','chain_focus'}:
             from src.utils.bounded_fragment_chains import recruit_fragment_chains
             from src.utils.candidate_containment_context import shared_candidate_order,containment_context
             base_support=aggregate_fragments(spatial,w,h)
@@ -81,6 +81,7 @@ def main():
             write_json(batch/'containment_context.json',containment_context(shared))
             arms={'free_page_selection':shared,'containment_context_v1':shared}
             if args.comparison=='chain_regression':arms={'free_page_selection':shared}
+            if args.comparison=='chain_focus':arms={'baseline_sheet':shared,'focus_sheet':shared}
     else:
         lines=detect_line_candidates(image)
         support=aggregate_fragments(lines,w,h);write_json(batch/'fragment_support.json',support)
@@ -89,9 +90,14 @@ def main():
     write_json(batch/'line_candidates.json',lines)
     for arm,proposals in arms.items():
         write_json(batch/(arm+'_candidates.json'),proposals)
+        from src.utils.candidate_focus import focus_bounds
+        bounds=focus_bounds(proposals,w,h) if arm=='focus_sheet' else [0,0,w,h]
+        write_json(batch/(arm+'_view.json'),dict(bounds=bounds,all_candidates_share_view=True,original_image_always_in_request=True))
         tiles=[]
         for r in proposals['candidates']:
             tile=image.copy();cv2.polylines(tile,[np.round(np.array(r['quad'])).astype(np.int32)],True,(0,0,255),2)
+            if arm=='focus_sheet':
+                x0,y0,x1,y1=bounds;tile=tile[y0:y1,x0:x1]
             tile=cv2.resize(tile,(203,360));cv2.putText(tile,r['id'],(3,20),cv2.FONT_HERSHEY_SIMPLEX,.4,(0,0,255),1);tiles.append(tile)
         if tiles:
             while len(tiles)%4:tiles.append(np.full((360,203,3),255,dtype=np.uint8))
@@ -171,7 +177,7 @@ def main():
                 cv2.polylines(preview,[np.round(quad).astype(np.int32)],True,(0,0,255),2)
                 cv2.imwrite(str(out/'boundary_overlay.jpg'),preview)
                 # Diagnostic page mapping, not a generated UI or perspective-accuracy assertion.
-                if args.comparison!='chain_regression':
+                if args.comparison not in {'chain_regression','chain_focus'}:
                     dst=np.array([[0,0],[1439,0],[1439,899],[0,899]],dtype=np.float32)
                     mapped=cv2.warpPerspective(image,cv2.getPerspectiveTransform(quad,dst),(1440,900))
                     cv2.imwrite(str(out/'mapped_page_1440x900.jpg'),mapped)
