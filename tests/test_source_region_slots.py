@@ -1,5 +1,5 @@
 import unittest
-from src.utils.source_region_slots import inventory_slots, bind_regions
+from src.utils.source_region_slots import inventory_slots, bind_regions, decode_region_coordinates
 
 
 class SourceRegionSlotsTest(unittest.TestCase):
@@ -35,6 +35,24 @@ class SourceRegionSlotsTest(unittest.TestCase):
 
     def test_empty_is_not_localized_coverage(self):
         self.assertEqual(bind_regions([], {'bindings': []})['localized_count'], 0)
+
+    def test_explicit_native_decode_preserves_input_and_evidence(self):
+        raw = {'bindings': [{'region_id': 'r1', 'bbox': [100, 700, 900, 900], 'visual_evidence': 'visible'}]}
+        result = decode_region_coordinates(raw, 1000)
+        self.assertEqual(result['bindings'][0]['bbox'], [.1, .7, .9, .9])
+        self.assertEqual(raw['bindings'][0]['bbox'], [100, 700, 900, 900])
+        self.assertEqual(result['bindings'][0]['visual_evidence'], 'visible')
+        self.assertEqual(bind_regions(self.slots, result)['localized_count'], 1)
+
+    def test_scale_is_never_guessed(self):
+        with self.assertRaises(ValueError): decode_region_coordinates(self.binding, 1024)
+        self.assertEqual(decode_region_coordinates(self.binding, 1000)['bindings'][0]['bbox'][0], .0001)
+        raw = {'bindings': [{**self.binding['bindings'][0], 'bbox': [0, 0, 1001, 900]}]}
+        with self.assertRaises(ValueError): decode_region_coordinates(raw, 1000)
+
+    def test_null_not_filled_by_unit_adapter(self):
+        raw = {'bindings': [{**self.binding['bindings'][0], 'bbox': None}]}
+        self.assertIsNone(decode_region_coordinates(raw, 1000)['bindings'][0]['bbox'])
 
 
 if __name__ == '__main__': unittest.main()

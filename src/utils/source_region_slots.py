@@ -1,5 +1,29 @@
 """Source-backed region evidence, without inventing page geometry or layout."""
 import math
+import copy
+
+
+def decode_region_coordinates(declaration, scale):
+    """Decode the declared experiment convention; never infer scale from values."""
+    if scale not in (1, 1000) or isinstance(scale, bool):
+        raise ValueError('Unsupported explicit grounding scale')
+    if not isinstance(declaration, dict) or set(declaration) != {'bindings'} or not isinstance(declaration['bindings'], list):
+        raise ValueError('Expected bindings for explicit coordinate decode')
+    result = copy.deepcopy(declaration)
+    for row in result['bindings']:
+        if not isinstance(row, dict) or 'bbox' not in row:
+            raise ValueError('Binding bbox missing')
+        box = row['bbox']
+        if box is None:
+            continue
+        if not isinstance(box, list) or len(box) != 4 or any(
+            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in box):
+            raise ValueError('Expected four finite coordinate values')
+        x0, y0, x1, y1 = box
+        if not (0 <= x0 < x1 <= scale and 0 <= y0 < y1 <= scale):
+            raise ValueError('Coordinates outside declared scale; no clamping or unit guessing')
+        row['bbox'] = [v / scale for v in box]
+    return result
 
 
 def inventory_slots(declaration, transcript):
