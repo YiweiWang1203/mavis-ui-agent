@@ -27,13 +27,13 @@ def main():
     from openai import OpenAI
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',type=Path,required=True);parser.add_argument('--output-root',type=Path,required=True)
-    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment','chain_identity','chain_regression','chain_focus','chain_permutation'],default='fragments')
+    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment','chain_identity','chain_regression','chain_focus','chain_permutation','chain_observation'],default='fragments')
     args=parser.parse_args();inputs=load_inputs(args.case.resolve(),'M2')
     batch=args.output_root.resolve()/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8])
     batch.mkdir(parents=True)
     image_path=batch/'image.jpg';shutil.copyfile(inputs['image'],image_path)
     image=cv2.imread(str(image_path));h,w=image.shape[:2]
-    if args.comparison in {'retention','identity','recruitment','chain_identity','chain_regression','chain_focus','chain_permutation'}:
+    if args.comparison in {'retention','identity','recruitment','chain_identity','chain_regression','chain_focus','chain_permutation','chain_observation'}:
         from unittest.mock import patch
         raw=cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD).detect(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY))[0]
         write_json(batch/'raw_lines.json',[] if raw is None else raw.tolist())
@@ -67,7 +67,7 @@ def main():
             write_json(batch/'recruited_support.json',recruited)
             arms={'existing_support':arms['spatial_retention_v1'],
                   'endpoint_recruitment_v1':closed_candidates(recruited['lines'],w,h,fragment_mode=True)}
-        if args.comparison in {'chain_identity','chain_regression','chain_focus','chain_permutation'}:
+        if args.comparison in {'chain_identity','chain_regression','chain_focus','chain_permutation','chain_observation'}:
             from src.utils.bounded_fragment_chains import recruit_fragment_chains
             from src.utils.candidate_containment_context import shared_candidate_order,containment_context
             base_support=aggregate_fragments(spatial,w,h)
@@ -82,6 +82,7 @@ def main():
             arms={'free_page_selection':shared,'containment_context_v1':shared}
             if args.comparison=='chain_regression':arms={'free_page_selection':shared}
             if args.comparison=='chain_focus':arms={'baseline_sheet':shared,'focus_sheet':shared}
+            if args.comparison=='chain_observation':arms={'baseline_order':shared,'candidate_blind_observation_v1':shared}
             if args.comparison=='chain_permutation':
                 from src.utils.candidate_permutation import permutation_arms
                 arms,permutation_mapping=permutation_arms(shared)
@@ -155,22 +156,42 @@ def main():
                 'A larger polygon can also be paper or background, so never automatically choose the largest or a root polygon. '
                 'Every original candidate remains selectable; containment is advisory, not a semantic label. '
                 'If no candidate is the full drawn UI page return null. Keep exactly the original two-field JSON output.')
+        if arm=='candidate_blind_observation_v1':
+            prompt=('Observe only this original photograph and the user intent. Locate the OUTER HAND-DRAWN UI PAGE, '
+                'not the paper, desk, photograph border or an internal region. Include all visible UI regions from top to bottom and left to right. '
+                'Report the axis-aligned bounding rectangle of the drawn page outer boundary, not a tight box around individual marks. '
+                'Coordinates must be fractions of the ORIGINAL image: [left/width, top/height, right/width, bottom/height], each in [0,1]. '
+                'Do not use pixels, percentages or a 0-1000 scale. Return exactly {"page_bbox":[left,top,right,bottom], '
+                '"visible_ui_evidence":"describe actual visible UI at the outer extents","uncertain":false}. '
+                'If the complete page boundary cannot be located, return page_bbox:null, uncertain:true and explain in visible_ui_evidence. '
+                'No candidate IDs, no inferred hidden edges.')
         compact=[{k:r[k] for k in ['id','side_ids','area_fraction','projected_support']} for r in proposals['candidates']]
         payload={'intent':intent,'image_size':[w,h],'candidates':compact}
         if arm=='containment_context_v1':
             payload['geometric_containment_context']=json.loads((batch/'containment_context.json').read_text(encoding='utf-8'))
         content=[{'type':'text','text':json.dumps(payload,ensure_ascii=False)},image_part(image_path)]
-        if compact:content.append(image_part(batch/(arm+'_sheet.jpg')))
+        if arm=='candidate_blind_observation_v1':
+            payload={'intent':intent,'image_size':[w,h]}
+            content=[{'type':'text','text':json.dumps(payload,ensure_ascii=False)},image_part(image_path)]
+        elif compact:content.append(image_part(batch/(arm+'_sheet.jpg')))
         try:
             if not compact:
-                declaration={'candidate_id':None,'unresolved_reason':'No geometrically supported candidate; model call skipped'}
+                declaration=({'page_bbox':None,'uncertain':True,'visible_ui_evidence':'No geometrically supported candidate; model call skipped'}
+                    if arm=='candidate_blind_observation_v1' else {'candidate_id':None,'unresolved_reason':'No geometrically supported candidate; model call skipped'})
             else:
                 response=client.chat.completions.create(model=model,temperature=0,max_tokens=8192,timeout=600,
                     response_format={'type':'json_object'},messages=[{'role':'system','content':prompt},{'role':'user','content':content}])
                 if response.choices[0].finish_reason=='length':raise ValueError('Truncated; no retry')
                 declaration=parse_spatial_response(response.choices[0].message.content)
             write_json(out/'proposal.json',declaration)
-            if arm=='page_scope_v1':
+            if arm=='candidate_blind_observation_v1':
+                from src.utils.candidate_blind_observation import match_observation
+                result=match_observation(proposals,declaration,w,h)
+                if declaration['page_bbox'] is not None:
+                    b=declaration['page_bbox'];observed=image.copy()
+                    cv2.rectangle(observed,(round(b[0]*w),round(b[1]*h)),(round(b[2]*w),round(b[3]*h)),(0,128,255),2)
+                    cv2.imwrite(str(out/'observation_overlay.jpg'),observed)
+            elif arm=='page_scope_v1':
                 from src.utils.page_scope_contract import select_with_scope
                 result=select_with_scope(proposals,declaration)
             else:
@@ -181,7 +202,7 @@ def main():
                 cv2.polylines(preview,[np.round(quad).astype(np.int32)],True,(0,0,255),2)
                 cv2.imwrite(str(out/'boundary_overlay.jpg'),preview)
                 # Diagnostic page mapping, not a generated UI or perspective-accuracy assertion.
-                if args.comparison not in {'chain_regression','chain_focus','chain_permutation'}:
+                if args.comparison not in {'chain_regression','chain_focus','chain_permutation','chain_observation'}:
                     dst=np.array([[0,0],[1439,0],[1439,899],[0,899]],dtype=np.float32)
                     mapped=cv2.warpPerspective(image,cv2.getPerspectiveTransform(quad,dst),(1440,900))
                     cv2.imwrite(str(out/'mapped_page_1440x900.jpg'),mapped)
