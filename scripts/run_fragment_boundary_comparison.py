@@ -27,13 +27,13 @@ def main():
     from openai import OpenAI
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',type=Path,required=True);parser.add_argument('--output-root',type=Path,required=True)
-    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment'],default='fragments')
+    parser.add_argument('--comparison',choices=['fragments','retention','identity','recruitment','chain_identity'],default='fragments')
     args=parser.parse_args();inputs=load_inputs(args.case.resolve(),'M2')
     batch=args.output_root.resolve()/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:8])
     batch.mkdir(parents=True)
     image_path=batch/'image.jpg';shutil.copyfile(inputs['image'],image_path)
     image=cv2.imread(str(image_path));h,w=image.shape[:2]
-    if args.comparison in {'retention','identity','recruitment'}:
+    if args.comparison in {'retention','identity','recruitment','chain_identity'}:
         from unittest.mock import patch
         raw=cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD).detect(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY))[0]
         write_json(batch/'raw_lines.json',[] if raw is None else raw.tolist())
@@ -67,6 +67,19 @@ def main():
             write_json(batch/'recruited_support.json',recruited)
             arms={'existing_support':arms['spatial_retention_v1'],
                   'endpoint_recruitment_v1':closed_candidates(recruited['lines'],w,h,fragment_mode=True)}
+        if args.comparison=='chain_identity':
+            from src.utils.bounded_fragment_chains import recruit_fragment_chains
+            from src.utils.candidate_containment_context import shared_candidate_order,containment_context
+            base_support=aggregate_fragments(spatial,w,h)
+            chained=recruit_fragment_chains(base_support,spatial,[] if raw is None else [list(map(float,r[0])) for r in raw],w,h)
+            write_json(batch/'chained_support.json',chained)
+            geometry=closed_candidates(chained['lines'],w,h,fragment_mode=True)
+            write_json(batch/'original_geometry_candidates.json',geometry)
+            shared,mapping=shared_candidate_order(geometry)
+            write_json(batch/'shared_identity_candidates.json',shared)
+            write_json(batch/'candidate_id_mapping.json',mapping)
+            write_json(batch/'containment_context.json',containment_context(shared))
+            arms={'free_page_selection':shared,'containment_context_v1':shared}
     else:
         lines=detect_line_candidates(image)
         support=aggregate_fragments(lines,w,h);write_json(batch/'fragment_support.json',support)
@@ -123,8 +136,18 @@ def main():
                 'Assess every supplied ID exactly once. Select only whole_ui_page with empty outside_ui_evidence. '
                 'If no full-page candidate exists, candidate_id:null and explain; do not choose the least bad candidate. '
                 'Do not edit coordinates, create a new ID or infer hidden lines. First image original; second candidate sheet.')
+        if arm=='containment_context_v1':
+            prompt+=(' The user text also contains code-computed geometric containment relations. '
+                'Use these as structural context to distinguish the outer UI page from its internal regions. '
+                'A candidate mostly covered by another may be a subregion; verify against the original image and intent. '
+                'A larger polygon can also be paper or background, so never automatically choose the largest or a root polygon. '
+                'Every original candidate remains selectable; containment is advisory, not a semantic label. '
+                'If no candidate is the full drawn UI page return null. Keep exactly the original two-field JSON output.')
         compact=[{k:r[k] for k in ['id','side_ids','area_fraction','projected_support']} for r in proposals['candidates']]
-        content=[{'type':'text','text':json.dumps({'intent':intent,'image_size':[w,h],'candidates':compact},ensure_ascii=False)},image_part(image_path)]
+        payload={'intent':intent,'image_size':[w,h],'candidates':compact}
+        if arm=='containment_context_v1':
+            payload['geometric_containment_context']=json.loads((batch/'containment_context.json').read_text(encoding='utf-8'))
+        content=[{'type':'text','text':json.dumps(payload,ensure_ascii=False)},image_part(image_path)]
         if compact:content.append(image_part(batch/(arm+'_sheet.jpg')))
         try:
             if not compact:
