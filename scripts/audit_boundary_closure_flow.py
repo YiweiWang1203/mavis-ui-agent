@@ -67,14 +67,16 @@ def main():
     import cv2
     import numpy as np
     from scripts.run_pilot_experiment import load_inputs
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--project',type=Path,required=True);args=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--project',type=Path,required=True)
+    p.add_argument('--comparison',choices=['trace','chains'],default='trace');args=p.parse_args()
     project=args.project.resolve();cycles=project/'outputs/optimization_cycles'
-    state=cycles/('round34_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
+    round_id='35' if args.comparison=='chains' else '34'
+    state=cycles/('round'+round_id+'_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
     lock=cycles/'active_generation.lock'
     with lock.open('x') as f:json.dump({'state':str(state)},f)
     state.mkdir();out=state/'results';out.mkdir()
     head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-    record=dict(round='34',status='running',head=head,checkout=str(ROOT),worker_pid=os.getpid(),result_root=str(out),physical_llm_call_budget=0,deep_network_forward_cap=0,python_executable=sys.executable)
+    record=dict(round=round_id,status='running',head=head,checkout=str(ROOT),worker_pid=os.getpid(),result_root=str(out),physical_llm_call_budget=0,deep_network_forward_cap=0,python_executable=sys.executable)
     save(state/'run.json',record)
     try:
         inputs=load_inputs(project/'outputs/pilot_cases/002_chat_asr_v1','M2');image=cv2.imread(str(inputs['image']));h,w=image.shape[:2]
@@ -85,11 +87,23 @@ def main():
         with patch.object(cv2,'createLineSegmentDetector',return_value=FrozenDetector()):
             selected=detect_line_candidates(image,selection='spatial_v1')
         original=aggregate_fragments(selected,w,h);recruited=recruit_endpoint_fragments(original,selected,coords,w,h)
+        arms=[('existing_support',original),('endpoint_recruitment_v1',recruited)]
+        if args.comparison=='chains':
+            from src.utils.bounded_fragment_chains import recruit_fragment_chains
+            chained=recruit_fragment_chains(original,selected,coords,w,h)
+            arms=[('endpoint_recruitment_v1',recruited),('bounded_chain_v1',chained)]
         save(out/'raw_lines.json',coords);save(out/'selected_lines.json',selected);shutil.copyfile(inputs['image'],out/'image.jpg')
         summaries={}
-        for name,support in [('existing_support',original),('endpoint_recruitment_v1',recruited)]:
+        for name,support in arms:
             save(out/(name+'_support.json'),support)
             production=closed_candidates(support['lines'],w,h,fragment_mode=True);save(out/(name+'_candidates.json'),production)
+            tiles=[]
+            for candidate in production['candidates']:
+                tile=image.copy();cv2.polylines(tile,[np.round(np.array(candidate['quad'])).astype(np.int32)],True,(0,0,255),2)
+                tile=cv2.resize(tile,(203,360));cv2.putText(tile,candidate['id'],(3,20),cv2.FONT_HERSHEY_SIMPLEX,.4,(0,0,255),1);tiles.append(tile)
+            if tiles:
+                while len(tiles)%4:tiles.append(np.full((360,203,3),255,dtype=np.uint8))
+                cv2.imwrite(str(out/(name+'_sheet.jpg')),np.vstack([np.hstack(tiles[i:i+4]) for i in range(0,len(tiles),4)]))
             counts=Counter();near=[];n=0
             with (out/(name+'_closure.jsonl')).open('w',encoding='utf-8') as f:
                 for row in trace_combinations(support['lines'],w,h):
@@ -103,7 +117,7 @@ def main():
             if dict(counts)!=expected:raise ValueError('Closure telemetry differs from production')
             summaries[name]=dict(combinations=n,counts=dict(counts),production_parity=True,candidates=len(production['candidates']))
             save(out/(name+'_near_misses.json'),dict(rows=near,limits='Diagnostic rejected or accepted combinations, not eligible page candidates; no semantic truth labels.'))
-        manifest=dict(status='diagnostic_finished_pending_review',actual_total_calls=0,deep_network_forward_count=0,code=head,runs=[],summaries=summaries,
+        manifest=dict(status='geometry_finished_pending_visual_review' if args.comparison=='chains' else 'diagnostic_finished_pending_review',comparison=args.comparison,actual_total_calls=0,deep_network_forward_count=0,code=head,runs=[],summaries=summaries,
             input_sha256={k:digest(v) for k,v in inputs['files'].items()},runtime=dict(python_executable=sys.executable,python_version=sys.version,cv2_path=cv2.__file__,numpy_path=np.__file__),
             artifact_sha256={p.name:digest(p) for p in out.iterdir() if p.is_file()})
         save(out/'batch.json',manifest);archive=Path(shutil.make_archive(str(out),'zip',root_dir=out));record.update(status='finished_pending_review',archive=str(archive),archive_sha256=digest(archive))
