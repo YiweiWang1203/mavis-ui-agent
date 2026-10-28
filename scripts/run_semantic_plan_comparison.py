@@ -44,8 +44,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--case', type=Path, required=True)
     parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'), default='semantic-page-v1')
+    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1'), default='semantic-page-v1')
     args = parser.parse_args()
+    projection = args.candidate_mode == 'projection-flow-v1'
+    cap = 2 if projection else 3
     inputs = load_inputs(args.case.resolve(), 'M2')
     state_dir = args.state.resolve()
     state_dir.mkdir(parents=True, exist_ok=False)
@@ -64,7 +66,7 @@ def main():
     record = {'status': 'running', 'worker_pid': os.getpid(), 'head': revision,
         'started_utc': datetime.now(timezone.utc).isoformat(), 'result_root': str(results),
         'actual_batch': str(batch), 'python_executable': sys.executable,
-        'expected_archive': str(state_dir / 'results.zip'), 'physical_call_cap': 3,
+        'expected_archive': str(state_dir / 'results.zip'), 'physical_call_cap': cap,
         'input_sha256': {k: sha256(v) for k, v in inputs['files'].items()},
         'candidate_mode': args.candidate_mode, 'engineering_only': False, 'behavior_evaluated': False}
     write_json(state_dir / 'run.json', record)
@@ -82,7 +84,7 @@ def main():
         UI_RELATION_SPECIALIST_MODE='off', UI_RELATION_AGGREGATION_MODE='off', UI_SEMANTIC_TYPE_MODE='off',
         UI_INPUT_SEMANTIC_AUDIT_MODE='off', UI_INPUT_CONTRACT_MODE='off', UI_HIERARCHY_LAYOUT_MODE='baseline',
         LAYOUT_SOLVER_ENABLED='1')
-    provider = CappedProvider(OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600), limit=3)
+    provider = CappedProvider(OpenAI(api_key=key, base_url=endpoint, max_retries=0, timeout=600), limit=cap)
     upstream, planned = BudgetClient(provider, shared), BudgetClient(provider, candidate)
     manifest = {**source_record(), 'status': 'started', 'model': model, 'candidate_mode': args.candidate_mode,
         'input_sha256': record['input_sha256'], 'runtime': {'python': sys.executable, 'version': sys.version},
@@ -91,9 +93,9 @@ def main():
         'max_tokens_per_stage': 8192, 'timeout_seconds': 600, 'max_retries': 0,
         'baseline_status': 'not_generated', 'candidate_status': 'not_generated',
         'device_request_added_equally': True, 'output_html_repair': False, 'behavior_evaluated': False}
-    if args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
-        manifest['call_accounting'] = {'physical_cap': 3, 'shared_vision_and_architecture': 2,
-            'baseline_exclusive': 0, 'candidate_exclusive': 1, 'baseline_effective': 2, 'candidate_effective': 3}
+    if args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1'}:
+        manifest['call_accounting'] = {'physical_cap': cap, 'shared_vision_and_architecture': 2,
+            'baseline_exclusive': 0, 'candidate_exclusive': 0 if projection else 1, 'baseline_effective': 2, 'candidate_effective': 2 if projection else 3}
     write_json(batch / 'batch.json', manifest)
     try:
         try:
@@ -125,7 +127,7 @@ def main():
         manifest['shared_vision_sha256'] = sha256(vision_path)
         manifest['same_image_url_sha256'] = image_hash
         planned.stage = args.candidate_mode
-        if args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
+        if args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1'}:
             from src.agents.frozen_region_planner import generate_frozen_region_plan, frozen_inventory, inventory_hash
             if not (baseline / 'ui_state.json').is_file():
                 raise ValueError('Fresh baseline semantic inventory required; no historical fallback')
@@ -136,15 +138,21 @@ def main():
                 from src.agents.symbolic_flow_planner import generate_symbolic_flow
                 planner = generate_symbolic_flow
             extra = {'flat_program': True} if args.candidate_mode == 'symbolic-flat-v1' else {}
-            state = planner(baseline_state, vision, **extra, request=inputs['prompt'], speech=inputs['transcript'],
-                frame=frame, viewport=viewport, image_data_url=image_url, client=planned, model=model, output=candidate)
+            if projection:
+                from src.utils.projection_flow_layout import compile_projection_flow
+                state = compile_projection_flow(baseline_state, vision, request=inputs['prompt'], speech=inputs['transcript'], frame=frame, viewport=viewport)
+                write_json(candidate / 'projection_diagnostics.json', state['page_meta']['projection_flow'])
+                write_json(candidate / 'ui_state.json', state)
+            else:
+                state = planner(baseline_state, vision, **extra, request=inputs['prompt'], speech=inputs['transcript'],
+                    frame=frame, viewport=viewport, image_data_url=image_url, client=planned, model=model, output=candidate)
             manifest['call_accounting'] = {'physical_cap': 3, 'shared_vision_and_architecture': 2,
                 'baseline_exclusive': 0, 'candidate_exclusive': 1, 'baseline_effective': 2, 'candidate_effective': 3}
         else:
             state = generate_semantic_page_plan(vision, request=inputs['prompt'], speech=inputs['transcript'],
                 frame=frame, viewport=viewport, image_data_url=image_url, client=planned, model=model, output=candidate)
-        if len(planned.calls) != 1:
-            raise ValueError('Exactly one new semantic planning call required')
+        if len(planned.calls) != (0 if projection else 1):
+            raise ValueError('Candidate call count differs from declared mode')
         (candidate / 'final_code.html').write_text(render_controlled_components(state), encoding='utf-8')
         manifest['candidate_status'] = 'html_generated_pending_semantic_and_browser_review'
         manifest['semantic_plan_status'] = state['page_meta'].get('semantic_plan', state['page_meta'].get('frozen_inventory_layout', {}))['status']
@@ -160,7 +168,9 @@ def main():
         request_elapsed_seconds=sum(c['elapsed_seconds'] for c in calls),
         finished_utc=datetime.now(timezone.utc).isoformat(),
         runs=[{'folder': str(baseline)}, {'folder': str(candidate)}])
-    frozen = args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}
+    frozen = args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1'}
+    if projection:
+        manifest['call_accounting'] = {'physical_cap': 2, 'shared_vision_and_architecture': 2, 'baseline_exclusive': 0, 'candidate_exclusive': 0, 'baseline_effective': 2, 'candidate_effective': 2}
     manifest['planned_call_accounting'] = manifest['call_accounting']
     manifest['realized_call_accounting'] = realized_accounting(upstream.calls, planned.calls, frozen)
     shared_count = len(upstream.calls) if frozen else min(1, len(upstream.calls))
