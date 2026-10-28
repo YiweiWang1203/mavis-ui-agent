@@ -56,6 +56,13 @@ def main():
             shutil.copyfile(src, full/(key+'.txt'))
         write_json(full/'case.json',dict(prompt='prompt.txt',transcript='transcript.txt',image='image.jpg',transcript_source=original['transcript_source']))
         write_json(state/'provenance.json',provenance)
+        evidence = state/'results/input_evidence'
+        evidence.mkdir(parents=True)
+        shutil.copyfile(provenance['raw_source'], evidence/'original_selected_frame.jpg')
+        shutil.copyfile(provenance['historical_crop'], evidence/'historical_crop.jpg')
+        shutil.copyfile(case/'preprocess/metadata/package.json', evidence/'historical_package.json')
+        shutil.copyfile(full/'image.jpg', evidence/'full_frame_oriented.jpg')
+        write_json(evidence/'provenance.json',provenance)
         env=os.environ.copy();env['MAVIS_ENV_FILE']=str(a.project/'.env')
         for name, source in [('frozen_crop',case),('full_frame',full)]:
             with (state/(name+'.log')).open('wb') as log:
@@ -67,6 +74,8 @@ def main():
                    if x.is_file() and x.suffix not in ['.log'] and x.name not in ['run.json','launch.json']}
         write_json(state/'evidence_manifest.json',dict(head=r['head'],artifact_sha256=artifacts,
                    scope='input correction, same historical selected frame; not new frame selection or HTML evaluation'))
+        write_json(state/'results/input_evidence/artifact_manifest.json',
+                   {x.relative_to(evidence).as_posix():sha256(x) for x in evidence.iterdir() if x.is_file()})
         archive=shutil.make_archive(str(state/'results'), 'zip',root_dir=state,base_dir='results')
         r.update(status='finished_pending_review',archive=archive,archive_sha256=sha256(Path(archive)))
     except Exception as e:
