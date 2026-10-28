@@ -2,9 +2,14 @@ import copy
 import unittest
 from src.utils.global_spatial_contract import compile_global_spatial
 from src.renderers.controlled_components import render_controlled_components
+from src.agents.global_spatial_planner import parse_spatial_response
 
 
 class GlobalSpatialTests(unittest.TestCase):
+    def test_duplicate_json_fields_cannot_silently_discard_regions(self):
+        with self.assertRaisesRegex(ValueError,'Duplicate spatial JSON field'):
+            parse_spatial_response('{"regions":[],"placements":[],"regions":[{}]}')
+
     def fixture(self):
         state={'page_meta':{'viewport':{'width':1440,'height':900}},'elements':[
             {'id':'v','type':'button','text':'操作','parent_id':None,'rpa_action':'click','spatial_info':{'bbox':[10,10,50,50]}}]}

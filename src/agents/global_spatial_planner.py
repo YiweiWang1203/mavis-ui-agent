@@ -5,6 +5,17 @@ from pathlib import Path
 from src.utils.global_spatial_contract import compile_global_spatial
 
 
+def parse_spatial_response(content):
+    def unique_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Duplicate spatial JSON field: '+key)
+            result[key] = value
+        return result
+    return json.loads(content, object_pairs_hook=unique_pairs)
+
+
 def plan_global_spatial(state, intent, image_path, model, client):
     prompt = (Path(__file__).resolve().parents[1]/'prompts/global_spatial.md').read_text(encoding='utf-8')
     url = 'data:image/jpeg;base64,'+base64.b64encode(Path(image_path).read_bytes()).decode('ascii')
@@ -17,7 +28,7 @@ def plan_global_spatial(state, intent, image_path, model, client):
                 {'type':'image_url','image_url':{'url':url}}]}])
     if response.choices[0].finish_reason == 'length':
         raise ValueError('Spatial plan truncated; no retry')
-    declaration = json.loads(response.choices[0].message.content)
+    declaration = parse_spatial_response(response.choices[0].message.content)
     # Preserve model proposals before compilation, including invalid proposals.
     (client.output/'spatial_proposal.json').write_text(json.dumps(declaration,ensure_ascii=False,indent=2),encoding='utf-8')
     return compile_global_spatial(state,intent,declaration)
