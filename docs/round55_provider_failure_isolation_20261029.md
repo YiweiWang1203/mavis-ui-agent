@@ -7,5 +7,5 @@
 
 同一002新视觉+架构共用2、候选额外1，物理上限3、每阶段8192/600秒/零重试。有效2/3是计划；实际按执行数报告。原UV/无安装、无GT、无ASR选帧重跑。若55再次同类供应商故障，下次先服务诊断，不再直接连续第三次生成。此门槛不阻止其他只读定位工作。
 主验收沿54：逐区内容/归属/比例、漏多错属、可辨性、遮挡；主输入1/1及固定七项实际操作；身份与尺寸/0越界，截图与原HTML哈希不变。几何安全不单独算可用性；无候选HTML不给操作分。单例开发/同实施者非独立人工，冻结论文指标不改。
-5. 工程检查、独立Ubuntu启动后补记。54原始失败完整保留。
+5. 已实施启动：代码98bc3fe6939cfa9ec51e8d3942228f3aac039fe7，本机71/Ubuntu原UV71检查通过。完整bundle独立检出/wyw/meeting_agent_workspace/my_agent_provider_isolation_98bc3fe，无alternates/无安装；程序/分配器/提示与54 Git字节一致及3输入哈希验证。PID143742，UTC21:05:30.932099 run.json确认为running；状态/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round55_20261028T210530Z_provider_isolation；批次results/20261028T210530Z_abd9ec54；预期状态目录/results.zip，日志状态路径后缀.worker.log。当前/设计/窗口/闭环与54终态已保存，下次先查该任务，不并发。54原始失败完整保留。
 6. 取得有效结果后才评价54机制；若进入布局后退化按数据转向；若输出契约仍不完整，重新审视模型职责/可用约束能力，不再换输出表示循环。
