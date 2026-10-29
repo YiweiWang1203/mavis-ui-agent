@@ -54,7 +54,7 @@ class Guard:
         expected={'vision':(0.0,{'type':'json_object'}),'ui_architect':(0.3,{'type':'json_object'}),'coder':(0.2,None),'direct':(0.2,None),'probe_json':(0,{'type':'json_object'}),'probe_text':(0,None)}
         temp,fmt=expected[stage]
         params={k:v for k,v in kwargs.items() if k not in ('model','messages')}
-        wanted={'temperature':temp,'max_tokens':8192}
+        wanted={'temperature':temp,'max_tokens':1024 if stage.startswith('probe_') else 8192}
         if fmt is not None:wanted['response_format']=fmt
         if params!=wanted:raise ValueError('Frozen non-model request parameters differ')
         if arm in ('R','S'):
@@ -85,7 +85,7 @@ class Transport:
         try:
             if len(self.calls)>=self.cap:raise ValueError('Unexpected extra request')
             if self.stage not in self.models:raise ValueError('Unapproved stage')
-            kwargs.update(model=self.models[self.stage],max_tokens=8192)
+            kwargs.update(model=self.models[self.stage],max_tokens=1024 if self.stage.startswith('probe_') else 8192)
             kwargs=self.guard.check(self.case,self.arm,self.stage,kwargs)
             image_hashes=[]
             for m in kwargs['messages']:

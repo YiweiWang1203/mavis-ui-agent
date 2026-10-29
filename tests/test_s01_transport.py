@@ -9,9 +9,8 @@ class Failure(Exception):
 
 class Tests(unittest.TestCase):
     def test_real_first_and_later_prompt_only_clock(self):
-        root=Path(__file__).resolve().parents[2]/'sprint_S01_20261029_v1/retrieved/S01_20261029T122227Z_ecd4953/results'
-        a=json.loads((root/'001_R/call_01.json').read_text(encoding='utf-8'))['request']
-        b=json.loads((root/'001_S/call_01.json').read_text(encoding='utf-8'))['request']
+        fixture=json.loads((Path(__file__).parent/'fixtures/s01_prompt_clocks.json').read_text(encoding='utf-8'))
+        a=fixture['R'];b=fixture['S']
         self.assertNotEqual(a['messages'][0],b['messages'][0])
         self.assertEqual(freeze_clock(a['messages'],'frozen'),freeze_clock(b['messages'],'frozen'))
         g=Guard('frozen')

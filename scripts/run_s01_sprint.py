@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 BASE='63b9b865bf5c09ef8ab87f3671380cf0a331d1f3'
-STRONG='moonshotai/Kimi-K2.7-Code'
+STRONG='Qwen/Qwen3-VL-32B-Instruct'
 REFERENCE='Qwen/Qwen3-VL-8B-Instruct'
 FLAGS={'UI_STRUCTURE_MODE':'baseline','UI_FUSION_MODE':'exact_id','LAYOUT_SOLVER_ENABLED':'1',
  'UI_RENDERER_MODE':'llm','UI_CODER_CONTRACT_MODE':'baseline','UI_INPUT_CONTRACT_MODE':'off',
@@ -51,7 +51,7 @@ def prepare(project,state):
 def main():
  ap=argparse.ArgumentParser();ap.add_argument('--project',type=Path,required=True);ap.add_argument('--state',type=Path,required=True);a=ap.parse_args()
  a.state.mkdir(parents=True,exist_ok=False)
- run={'experiment':'S01','started_utc':now(),'worker_pid':os.getpid(),'base_commit':BASE,
+ run={'experiment':'S01b','started_utc':now(),'worker_pid':os.getpid(),'base_commit':BASE,
       'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
       'python':sys.version,'python_executable':sys.executable,'status':'preparing','flags':FLAGS,
       'max_tokens':8192,'timeout_seconds':600,'sdk_retries':0,'max_concurrent_arms':1,
@@ -83,7 +83,7 @@ def main():
    def __init__(self,output,models,cap,case='probe',arm='probe'):
     super().__init__(client,output,models,cap,guard,run,a.state,case,arm,pilot.safe_messages)
   probe=a.state/'probe';probe.mkdir()
-  traced=Traced(probe,{'probe_json':STRONG,'probe_text':STRONG},2)
+  traced=Traced(probe,{'probe_json':STRONG},1)
   image=base64.b64encode((cases['001']/'image.jpg').read_bytes()).decode()
   run['status']='probe_running';write(a.state/'run.json',run)
   traced.stage='probe_json'
@@ -92,9 +92,6 @@ def main():
    {'role':'user','content':[{'type':'text','text':'Briefly describe the visible sketch in one sentence. Return {"description":"..."}. Do not generate a page.'},{'type':'image_url','image_url':{'url':'data:image/jpeg;base64,'+image}}]}])
   parsed=json.loads(response.choices[0].message.content)
   if not isinstance(parsed.get('description'),str) or not parsed['description'].strip():raise ValueError('JSON probe contract failed')
-  traced.stage='probe_text'
-  response=traced.create(model=STRONG,temperature=0,messages=[{'role':'user','content':'Output exactly S01_READY as plain text, without markdown or explanation.'}])
-  if response.choices[0].message.content.strip()!='S01_READY':raise ValueError('Text probe contract failed')
   write(probe/'probe_summary.json',{'status':'admitted','usage':[c['response'].get('usage') for c in traced.calls],'warning':'protocol access only; no page quality conclusion'})
   run['probe_archive']=pack(probe);run['status']='generating';write(a.state/'run.json',run)
   sources={str(p.relative_to(ROOT)):digest(p) for directory in ['src','scripts'] for p in (ROOT/directory).rglob('*') if p.is_file() and p.suffix in {'.py','.md','.json'}}
@@ -107,7 +104,7 @@ def main():
      continue
     folder=a.state/'results'/(case+'_'+arm);folder.mkdir(parents=True)
     models={s:model for s in ['vision','ui_architect','coder','direct']};trace=Traced(folder,models,1 if arm=='D' else 3,case,arm)
-    summary={'experiment':'S01','case_id':case,'arm':arm,'condition':condition,'started_utc':now(),'status':'running',
+    summary={'experiment':'S01b','case_id':case,'arm':arm,'condition':condition,'started_utc':now(),'status':'running',
       'commit':run['commit'],'models':models,'renderer':'llm','flags':FLAGS,'source_sha256':sources,'cost_amount':None}
     write(folder/'run_summary.json',summary)
     start=time.monotonic()
