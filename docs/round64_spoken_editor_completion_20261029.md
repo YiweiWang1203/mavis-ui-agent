@@ -14,3 +14,7 @@
 
 ## 实际启动
 生成代码 5ca0f5698ab4163da4a6f55d3ddb6330c01dd1cc 已推送；本地45检查通过，Ubuntu适用门槛34检查通过，均0跳过；渲染集成测试初期fixture缺layout_solver标记已修测试fixture后通过，未放宽生产门槛。无安装。北京时间10:43:52启动，原UV /wyw/meeting_agent_workspace/my_agent/.venv/bin/python，PID151248。独立检出 /wyw/meeting_agent_workspace/my_agent_spoken_editor_completion_5ca0f56；状态 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round64_20261029T024349Z_spoken_editor_completion；实际批次 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round64_20261029T024349Z_spoken_editor_completion/results/20261029T024352Z_4719a6f6；预期ZIP /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round64_20261029T024349Z_spoken_editor_completion/results.zip；日志 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round64_20261029T024349Z_spoken_editor_completion.worker.log。三个输入哈希与冻结案例一致，见current_remote.json。状态running，最多3物理调用，每阶段8192/600秒/0重试，效果待验收。
+
+
+## 终态：错误missing与混合单位，候选失败
+原ZIP e419f849a56fe5d79cde616599161593af69a9ae7a43302735152a7b4595e4d9，40内部/187源码/3输入哈希核验通过。3物理请求8618token/192.148675秒，共享2/候选独占1，有效2/3。原始补全声称r1缺失、两个框均[72,675,1368,765]；观察框违反0—1空间而首先被拒，绝不自动除尺寸。但还存在独立语义错误：原清单已有e12“输入框”，所以不能仅称单位问题或让缺失补全通过。无候选HTML，不填候选操作/IoU/接受率；基线实操无原生主输入0/1、七标签提示5/7，资料被加号覆盖，历史无提示；12/12位置尺寸、0越界、ID唯一、原HTML哈希不变，截图已查看。新上游多出消息标签是跨轮差异不归因候选。导师要求不救失败补全、连续无收益重定位职责：65冻结编译器，由代码唯一字面锚点绑定已有ID，零额外模型请求，不新增实体或坐标；歧义未决不强配。详review.json及原call_01.json、browser/audit.json。
