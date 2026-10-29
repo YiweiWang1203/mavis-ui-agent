@@ -13,3 +13,7 @@
 
 5. 必要工程测试：默认路径仍文本、显式启用必须有效同图URL、旧图像分支保持；物理调用上限和证据清单。真实新HTML须chat002七点击与主输入、截图、尺寸/越界/遮挡/错属/多余审查后才给预览。无HTML记失败不填操作分。比例/层级仍单列，输入或内容恢复不自动等于布局改善；相对58已获能力另作非因果回归检查。
 6. 决定门槛：无恢复/退化则不默认启用图像开关，回到需求与观察跨源对应关系，不重复采样或加提示救结果；若仅改善局部则保留可选，再冻结机制小规模回归。单例002开发、同实施者非独立人工，论文冻结分不改。本轮必须启动后保存真实PID/版本/输入/批次/ZIP。
+
+## 启动回执
+
+代码3d440d5d3206a954b61f230b077262e7fd493803已推送codex/hierarchy-spatial-contract；本机30/Ubuntu原UV30工程检查通过，非效果。独立检出/wyw/meeting_agent_workspace/my_agent_architect_same_frame_3d440d5；PID148494；UTC00:42:13实际run.json为running；输入3哈希与59一致。状态/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round60_20261029T004210Z_architect_same_frame；实际批次/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round60_20261029T004210Z_architect_same_frame/results/20261029T004213Z_ef94088a；预期ZIP/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round60_20261029T004210Z_architect_same_frame/results.zip；日志/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round60_20261029T004210Z_architect_same_frame.worker.log。未重复启动59；本次启动后不再连跑或提前验收60，下一次先读真实终态和完整证据。
