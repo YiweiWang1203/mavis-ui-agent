@@ -19,9 +19,12 @@ def compile_architect_target_layout(raw_state, vision, *, frame, viewport):
         if e.get('type') in {'button','input','search_input','search_bar','textarea','select'} and (bounds[2]-bounds[0]<24 or bounds[3]-bounds[1]<24):
             raise ValueError('Explicit target placement has insufficient control space')
         ref='vision:'+vid if isinstance(vid,str) else 'spoken_intent:'+str(eid)
+        submitted_derivation=e.get('spatial_info',{}).get('derivation')
+        derivation=copy.deepcopy(submitted_derivation) if isinstance(submitted_derivation,dict) else {
+            'kind':'semantic_layout','evidence_refs':[ref],
+            'reason':'Existing target bbox from this fresh architect response; source reference does not prove layout correctness'}
         placements.append({'entity_id':eid,'coordinate_space':'viewport_px','viewport_id':viewport['id'],
-            'bbox':copy.deepcopy(bounds),'derivation':{'kind':'semantic_layout','evidence_refs':[ref],
-            'reason':'Existing target bbox from this fresh architect response; source reference does not prove layout correctness'}})
+            'bbox':copy.deepcopy(bounds),'derivation':derivation})
     contract={'version':'evidence-layout-v1','frame':copy.deepcopy(frame),'viewport':copy.deepcopy(viewport),
               'placements':placements}
     result=build_structure(raw_state,vision,coordinate_contract=contract)
@@ -41,6 +44,10 @@ def compile_architect_target_layout(raw_state, vision, *, frame, viewport):
     result['page_meta']['architect_target_layout']={'version':'architect-target-layout-v1',
         'status':'target_geometry_validated_semantics_not_evaluated','parent_containment_conflicts':outside,
         'sibling_conflicts':overlaps,'observations_used_as_target_coordinates':False,
-        'hidden_clamping':False,'missing_semantics_repaired':False}
+        'hidden_clamping':False,'missing_semantics_repaired':False,
+        'submitted_derivation_preserved':all(isinstance(
+            e.get('spatial_info',{}).get('derivation'),dict) for e in raw_state.get('elements',[])),
+        'compiler_derivation_fallback_count':sum(not isinstance(
+            e.get('spatial_info',{}).get('derivation'),dict) for e in raw_state.get('elements',[]))}
     trace_event('architect.explicit_target_layout',raw_state=raw_state,coordinate_contract=contract,output=result)
     return result

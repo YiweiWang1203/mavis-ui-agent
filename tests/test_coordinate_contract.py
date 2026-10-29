@@ -3,6 +3,11 @@ import copy
 import unittest
 
 from src.utils.hierarchy_contract import build_structure, solve_hierarchy
+from src.utils.coordinate_contract import (
+    CoordinateResponsibilityError,
+    audit_architect_coordinate_responsibility,
+    enforce_architect_coordinate_responsibility,
+)
 
 
 def fixture():
@@ -28,6 +33,82 @@ def fixture():
 
 
 class CoordinateContractTests(unittest.TestCase):
+    def responsibility_fixture(self):
+        state, vision, contract = fixture()
+        vision['canvas'] = {'width': 600, 'height': 900}
+        provenance = {'observation_frame': copy.deepcopy(contract['frame']),
+                      'target_viewport': copy.deepcopy(contract['viewport'])}
+        for element, placement in zip(state['elements'], contract['placements']):
+            element['spatial_info'] = {
+                'bbox': copy.deepcopy(placement['bbox']),
+                'coordinate_space': 'viewport_px', 'viewport_id': 'vp1',
+                'derivation': copy.deepcopy(placement['derivation']),
+            }
+        return state, vision, provenance
+
+    def test_pre_overwrite_audit_accepts_declared_dual_spaces(self):
+        state, vision, provenance = self.responsibility_fixture()
+        report = enforce_architect_coordinate_responsibility(state, vision, provenance)
+        self.assertEqual((report['valid_count'], report['invalid_count'], report['skipped_count']), (2, 0, 0))
+        self.assertEqual(report['observation_geometry']['size'], {'width': 600, 'height': 900})
+        self.assertEqual(report['target_placement']['size'], {'width': 1000, 'height': 700})
+        self.assertEqual(report['mapping_strategy'], 'pending_user_decision')
+
+    def test_pre_overwrite_audit_rejects_zero_area_without_repair(self):
+        state, vision, provenance = self.responsibility_fixture()
+        for element in state['elements']:
+            element['spatial_info']['bbox'] = [1000, 700, 1000, 700]
+        original = copy.deepcopy(state)
+        with self.assertRaises(CoordinateResponsibilityError) as caught:
+            enforce_architect_coordinate_responsibility(state, vision, provenance)
+        report = caught.exception.diagnostic
+        self.assertEqual((report['invalid_count'], report['element_count'], report['skipped_count']), (2, 2, 0))
+        self.assertTrue(all(item['raw_bbox'] == [1000, 700, 1000, 700] for item in report['elements']))
+        self.assertEqual(state, original)
+
+    def test_pre_overwrite_audit_reports_missing_space_derivation_and_partial_placement(self):
+        state, vision, provenance = self.responsibility_fixture()
+        state['elements'][0]['spatial_info'].pop('coordinate_space')
+        state['elements'][0]['spatial_info'].pop('derivation')
+        state['elements'][1]['spatial_info'].pop('bbox')
+        report = audit_architect_coordinate_responsibility(state, vision, provenance)
+        codes = [{issue['code'] for issue in item['issues']} for item in report['elements']]
+        self.assertIn('missing_or_wrong_coordinate_space', codes[0])
+        self.assertIn('missing_derivation', codes[0])
+        self.assertIn('missing_placement', codes[1])
+        self.assertEqual((report['invalid_count'], report['skipped_count']), (2, 1))
+
+    def test_pre_overwrite_audit_reports_object_coverage(self):
+        state, vision, provenance = self.responsibility_fixture()
+        state['elements'].pop()
+        report = audit_architect_coordinate_responsibility(state, vision, provenance)
+        coverage = [item for item in report['global_issues']
+                    if item['code'] == 'architect_vision_coverage_mismatch']
+        self.assertEqual(coverage[0]['missing'], ['v2'])
+        self.assertEqual(report['status'], 'rejected')
+
+    def test_pre_overwrite_audit_rejects_unknown_derivation_reference(self):
+        state, vision, provenance = self.responsibility_fixture()
+        state['elements'][0]['spatial_info']['derivation']['evidence_refs'] = [
+            'vision:does_not_exist']
+        report = audit_architect_coordinate_responsibility(state, vision, provenance)
+        issues = report['elements'][0]['issues']
+        unknown = [item for item in issues if item['code'] == 'unknown_derivation_sources']
+        self.assertEqual(unknown[0]['references'], ['vision:does_not_exist'])
+        self.assertEqual(report['status'], 'rejected')
+
+    def test_pre_overwrite_audit_rejects_nonfinite_outside_and_photo_sized_target(self):
+        for bbox in ([0, 0, float('nan'), 10], [-1, 0, 20, 20]):
+            state, vision, provenance = self.responsibility_fixture()
+            state['elements'][0]['spatial_info']['bbox'] = bbox
+            self.assertEqual(audit_architect_coordinate_responsibility(
+                state, vision, provenance)['invalid_count'], 1)
+        state, vision, provenance = self.responsibility_fixture()
+        provenance['target_viewport'] = {'id': 'vp1', 'width': 600, 'height': 900}
+        report = audit_architect_coordinate_responsibility(state, vision, provenance)
+        self.assertIn('target_viewport_mismatch', {item['code'] for item in report['global_issues']})
+        self.assertEqual(report['status'], 'rejected')
+
     def test_background_shift_changes_observation_not_placement_or_identity(self):
         state, vision, contract = fixture()
         original = copy.deepcopy((state, vision, contract))

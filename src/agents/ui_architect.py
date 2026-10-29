@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import os
 from typing import Any
@@ -39,6 +40,66 @@ def read_ui_architect_prompt():
             "You are a UI architect. Fuse user intent and validated vision elements "
             "into a UI-State JSON contract."
         )
+
+
+def generate_target_layout_attempt(user_intent: str, vision_elements: dict,
+                                   trusted_coordinate_context: dict, *,
+                                   correction_feedback: dict | None = None,
+                                   preferred_locale: str | None = None,
+                                   client=None, attempt_id: str = 'architect-0') -> dict:
+    """Run one target-layout attempt without legacy repair or exception swallowing.
+
+    The caller owns frame/hash/viewport provenance.  The model only returns the
+    target UI state described by the dedicated prompt.  Parsing failures retain
+    the raw response; provider failures propagate to the graph node.
+    """
+    from pathlib import Path
+    prompt_path = Path(__file__).resolve().parents[1] / 'prompts/ui_architect_target_layout_v1.md'
+    system_prompt = prompt_path.read_text(encoding='utf-8')
+    observation_frame = trusted_coordinate_context.get('observation_frame', {})
+    target_viewport = trusted_coordinate_context.get('target_viewport', {})
+    model_context = {
+        'observation_frame': {key: observation_frame.get(key) for key in ('id', 'width', 'height')},
+        'target_viewport': {key: target_viewport.get(key) for key in ('id', 'width', 'height')},
+    }
+    user_payload = {
+        'user_intent': user_intent,
+        'preferred_locale': preferred_locale or infer_locale_from_text(user_intent),
+        'trusted_coordinate_context': model_context,
+        'vision_elements': vision_elements,
+    }
+    if correction_feedback is not None:
+        user_payload['correction_feedback'] = correction_feedback
+    request_content = json.dumps(user_payload, ensure_ascii=False, indent=2)
+    provider = client or _get_openai_client()
+    planner_model = os.getenv('CODER_PROD_MODEL', os.getenv('CODER_MODEL', 'deepseek-ai/DeepSeek-V3'))
+    response = provider.chat.completions.create(
+        model=planner_model,
+        messages=[{'role': 'system', 'content': system_prompt},
+                  {'role': 'user', 'content': request_content}],
+        temperature=0.3, response_format={'type': 'json_object'},
+        max_tokens=8192, timeout=600)
+    choice = response.choices[0]
+    raw = choice.message.content or ''
+    result = {
+        'attempt_id': attempt_id,
+        'raw_response': raw,
+        'finish_reason': choice.finish_reason,
+        'prompt_sha256': hashlib.sha256(system_prompt.encode('utf-8')).hexdigest(),
+        'request_sha256': hashlib.sha256(request_content.encode('utf-8')).hexdigest(),
+        'correction_feedback': copy.deepcopy(correction_feedback),
+        'model': planner_model,
+    }
+    if choice.finish_reason != 'stop':
+        result.update(status='incomplete_response', parsed=None)
+    else:
+        try:
+            result.update(status='parsed', parsed=json.loads(raw))
+        except json.JSONDecodeError as exc:
+            result.update(status='parse_error', parsed=None,
+                          parse_error={'type': type(exc).__name__, 'position': exc.pos})
+    trace_event('architect.target_layout_attempt', attempt=result)
+    return result
 
 
 def _infer_viewport(vision_elements: dict | None, ui_state: dict | None = None) -> dict[str, int]:
@@ -310,6 +371,9 @@ def finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, pr
         ui_state=compile_spoken_inputs(ui_state,vision_elements,user_intent)
     if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
         from src.utils.hierarchy_contract import build_structure, solve_hierarchy
+        coordinate_mode = os.getenv('UI_COORDINATE_RESPONSIBILITY_MODE', 'off')
+        if coordinate_mode not in {'off', 'strict_v1'}:
+            raise ValueError('Unsupported coordinate responsibility mode')
         if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
             from src.utils.relation_evidence import apply_relation_evidence
             if structure_mode in {'hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
@@ -325,6 +389,20 @@ def finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, pr
             else:
                 ui_state = apply_relation_evidence(ui_state, user_intent,
                     isolate_source_errors=structure_mode in {"hierarchy_partial_evidence_v1", "hierarchy_registry_v1", "hierarchy_registry_inline_v1", "hierarchy_registry_image_v1", "hierarchy_node_evidence_v1"})
+        if coordinate_mode == 'strict_v1':
+            from src.utils.architect_target_layout import compile_architect_target_layout
+            from src.utils.coordinate_contract import (
+                CoordinateResponsibilityError, audit_architect_coordinate_responsibility)
+            provenance = ui_state.get('page_meta', {}).get('coordinate_provenance')
+            diagnostic = audit_architect_coordinate_responsibility(
+                ui_state, vision_elements, provenance)
+            trace_event('architect.coordinate_responsibility', diagnostic=diagnostic)
+            if diagnostic['status'] != 'valid':
+                raise CoordinateResponsibilityError(diagnostic)
+            return compile_architect_target_layout(
+                ui_state, vision_elements,
+                frame=provenance['observation_frame'],
+                viewport=provenance['target_viewport'])
         return solve_hierarchy(build_structure(ui_state, vision_elements))
     repaired = repair_ui_state_with_vision(
         ui_state,

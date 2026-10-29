@@ -1,7 +1,10 @@
 import copy
 import unittest
+from unittest.mock import patch
 from src.utils.architect_target_layout import compile_architect_target_layout
+from src.utils.coordinate_contract import CoordinateResponsibilityError
 from src.utils.hierarchy_contract import build_structure
+from src.agents.ui_architect import finalize_ui_state
 from src.renderers.controlled_components import render_controlled_components
 
 
@@ -15,6 +18,51 @@ def fixture():
 
 
 class TargetLayoutTests(unittest.TestCase):
+    def test_strict_finalize_uses_pre_overwrite_gate_and_preserves_target(self):
+        raw,v,f,vp=fixture()
+        raw['page_meta']['coordinate_provenance']={'observation_frame':f,'target_viewport':vp}
+        submitted={'kind':'semantic_layout','evidence_refs':['vision:e1'],'reason':'declared test plan'}
+        raw['elements'][0]['spatial_info'].update(
+            coordinate_space='viewport_px', viewport_id='pc',
+            derivation=copy.deepcopy(submitted))
+        with patch.dict('os.environ', {'UI_COORDINATE_RESPONSIBILITY_MODE':'strict_v1'}):
+            result=finalize_ui_state(raw,'',v,'hierarchy_v1')
+        self.assertEqual(result['elements'][0]['spatial_info']['bbox'],[400,700,1200,770])
+        self.assertEqual(result['elements'][0]['spatial_info']['derivation'],submitted)
+        self.assertTrue(result['page_meta']['architect_target_layout']['submitted_derivation_preserved'])
+        self.assertEqual(result['page_meta']['architect_target_layout']['compiler_derivation_fallback_count'],0)
+        self.assertFalse(result['page_meta']['coordinate_contract']['implicit_photo_to_viewport_mapping'])
+
+    def test_compiler_preserves_submitted_derivation_fields(self):
+        raw,v,f,vp=fixture()
+        submitted={'kind':'semantic_layout','evidence_refs':['vision:e1'],
+                   'reason':'original source rationale','review_note':'semantics unverified'}
+        raw['elements'][0]['spatial_info']['derivation']=copy.deepcopy(submitted)
+        result=compile_architect_target_layout(raw,v,frame=f,viewport=vp)
+        self.assertEqual(result['elements'][0]['spatial_info']['derivation'],submitted)
+
+    def test_compiler_rejects_unknown_submitted_source_without_rewriting(self):
+        raw,v,f,vp=fixture()
+        raw['elements'][0]['spatial_info']['derivation']={
+            'kind':'semantic_layout','evidence_refs':['vision:does_not_exist'],
+            'reason':'invalid source probe'}
+        before=copy.deepcopy(raw)
+        with self.assertRaisesRegex(ValueError,'evidence references'):
+            compile_architect_target_layout(raw,v,frame=f,viewport=vp)
+        self.assertEqual(raw,before)
+
+    def test_strict_finalize_rejects_round65_shape_before_overwrite(self):
+        raw,v,f,vp=fixture()
+        raw['page_meta']['coordinate_provenance']={'observation_frame':f,'target_viewport':vp}
+        raw['elements'][0]['spatial_info']['bbox']=[1440,900,1440,900]
+        before=copy.deepcopy(raw)
+        with patch.dict('os.environ', {'UI_COORDINATE_RESPONSIBILITY_MODE':'strict_v1'}):
+            with self.assertRaises(CoordinateResponsibilityError) as caught:
+                finalize_ui_state(raw,'',v,'hierarchy_v1')
+        self.assertEqual(caught.exception.diagnostic['invalid_count'],1)
+        self.assertEqual(caught.exception.diagnostic['elements'][0]['raw_bbox'],[1440,900,1440,900])
+        self.assertEqual(raw,before)
+
     def test_target_is_retained_observations_do_not_move_it(self):
         raw,v,f,vp=fixture();before=copy.deepcopy((raw,v))
         first=compile_architect_target_layout(raw,v,frame=f,viewport=vp)
