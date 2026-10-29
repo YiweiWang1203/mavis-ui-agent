@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class FeedbackRunnerTests(unittest.TestCase):
     def test_dry_run_creates_terminal_state_and_archive_without_model_calls(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+        (ROOT / 'outputs').mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=ROOT/'outputs', ignore_cleanup_errors=True) as folder:
             root = Path(folder); case = root / 'case'; case.mkdir(); state = root / 'state'
             (case / 'prompt.txt').write_text('PC target 1440x900', encoding='utf-8')
             (case / 'transcript.txt').write_text('需要一个发送按钮。', encoding='utf-8')
