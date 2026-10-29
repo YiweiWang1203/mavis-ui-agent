@@ -10,3 +10,7 @@
 主验收：主聊天输入实际填写读回1/1，且独立source框确实落在草图编辑区、目标框符合口述区域关系；任何一项失败不称完整补全。原有ID/文字/类型/父/动作/位置/尺寸全保留；七入口所有基线成功项保持、0新增遮挡/越界，重复主编辑器0。新input不是增加元素数就通过。候选若因严格门槛失败保留错误，无候选HTML不填操作分。既有语音/发送遮挡、头像/消息缺失不在本轮解决，全部单列。
 5. 保存前源码、原请求响应、槽/匹配未决/新增原始框/目标框、原HTML；工程检查严格拒绝身份改动、重叠/越界/重复及来源异常，真实生成后实操截图。
 6. 有效只保留可选窄补全，后续冻结回归再接区域比例；无效按缺失判断/观察定位/布局/渲染分层，不救提示阈值。本例开发、同实施者非独立人工、冻结论文分不变。
+
+
+## 实际启动
+生成代码 5ca0f5698ab4163da4a6f55d3ddb6330c01dd1cc 已推送；本地45检查通过，Ubuntu适用门槛34检查通过，均0跳过；渲染集成测试初期fixture缺layout_solver标记已修测试fixture后通过，未放宽生产门槛。无安装。北京时间10:43:52启动，原UV /wyw/meeting_agent_workspace/my_agent/.venv/bin/python，PID151248。独立检出 /wyw/meeting_agent_workspace/my_agent_spoken_editor_completion_5ca0f56；状态 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round64_20261029T024349Z_spoken_editor_completion；实际批次 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round64_20261029T024349Z_spoken_editor_completion/results/20261029T024352Z_4719a6f6；预期ZIP /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round64_20261029T024349Z_spoken_editor_completion/results.zip；日志 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round64_20261029T024349Z_spoken_editor_completion.worker.log。三个输入哈希与冻结案例一致，见current_remote.json。状态running，最多3物理调用，每阶段8192/600秒/0重试，效果待验收。
