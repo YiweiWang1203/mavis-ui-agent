@@ -15,3 +15,7 @@
 
 5. 工程验证：显式布局不随照片bbox改变、旧基线保持；默认不变；不修改输入；漏位置/越界/小控件拒绝；来源完整；控件渲染支持既有显式契约。保存旧源码/差异/原始前布局与两组结果、实际调用/预算、错误。新HTML必须固定chat002实际操作和截图，HTTP200后才给预览。
 6. 若无收益则不启用该位置所有权策略，回到页面/区域计划职责重新设计，不重跑选优；若有可见收益仅保留可选，冻结后小回归再接区域比例。13例仍开发，同实施者非独立人工，论文冻结分不改。启动后写真实PID/代码/输入/批次/ZIP。
+
+
+## 实际启动
+生成代码 86f1d7e50840536eb14ab08342cd374c3ed121c7；两端45检查通过、0跳过、无依赖安装。UTC01:45:44启动，原UV /wyw/meeting_agent_workspace/my_agent/.venv/bin/python；PID149930。独立检出 /wyw/meeting_agent_workspace/my_agent_target_layout_86f1d7e；状态 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round62_20261029T014541Z_target_layout；批次 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round62_20261029T014541Z_target_layout/results/20261029T014544Z_1775e3e7；预期ZIP /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round62_20261029T014541Z_target_layout/results.zip；日志 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round62_20261029T014541Z_target_layout.worker.log。输入三哈希见current_remote.json，逐项匹配冻结案例。状态running，效果待验收，不在本次重复启动。
