@@ -44,13 +44,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--case', type=Path, required=True)
     parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1', 'desktop-chat-scaffold-v1', 'architect-same-frame-v1', 'architect-target-layout-v1'), default='semantic-page-v1')
+    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1', 'desktop-chat-scaffold-v1', 'architect-same-frame-v1', 'architect-target-layout-v1', 'full-frame-requirements-v1'), default='semantic-page-v1')
     args = parser.parse_args()
     projection = args.candidate_mode in {'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1'}
     role_anchor = args.candidate_mode == 'projection-input-slots-v1'
     footprints = args.candidate_mode == 'projection-button-footprints-v1'
     scaffold = args.candidate_mode == 'desktop-chat-scaffold-v1'
     paired_projection = role_anchor or footprints or scaffold
+    requirements = args.candidate_mode == 'full-frame-requirements-v1'
     target_layout = args.candidate_mode == 'architect-target-layout-v1'
     cap = 2 if projection or target_layout else 3
     inputs = load_inputs(args.case.resolve(), 'M2')
@@ -98,7 +99,7 @@ def main():
         'max_tokens_per_stage': 8192, 'timeout_seconds': 600, 'max_retries': 0,
         'baseline_status': 'not_generated', 'candidate_status': 'not_generated',
         'device_request_added_equally': True, 'output_html_repair': False, 'behavior_evaluated': False}
-    if projection or target_layout or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
+    if projection or target_layout or requirements or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
         manifest['call_accounting'] = {'physical_cap': cap, 'shared_vision_and_architecture': 2,
             'baseline_exclusive': 0, 'candidate_exclusive': 0 if projection or target_layout else 1, 'baseline_effective': 2, 'candidate_effective': 2 if projection or target_layout else 3}
     write_json(batch / 'batch.json', manifest)
@@ -144,7 +145,21 @@ def main():
         manifest['shared_vision_sha256'] = sha256(vision_path)
         manifest['same_image_url_sha256'] = image_hash
         planned.stage = args.candidate_mode
-        if target_layout:
+        if requirements:
+            from src.agents.input_requirement_binder import bind_input_requirements, input_requirement_slots
+            from src.utils.spoken_input_evidence import compile_spoken_inputs
+            from src.utils.requirement_recovery_guard import validate_requirement_recovery
+            from src.utils.pipeline_trace import PipelineTrace
+            baseline_state = json.loads((baseline / 'ui_state.json').read_text(encoding='utf-8'))
+            manifest['candidate_compiler_attempted'] = True
+            manifest['requirement_slot_count'] = len(input_requirement_slots(inputs['transcript'])[0])
+            with PipelineTrace(candidate / 'pipeline_trace', {'entrypoint': 'frozen_requirement_recovery'}):
+                bound = bind_input_requirements(baseline_state, vision, inputs['transcript'], model, planned)
+                state = compile_spoken_inputs(bound, vision, inputs['transcript'])
+            manifest['recovery_guard'] = validate_requirement_recovery(baseline_state, state)
+            write_json(candidate / 'ui_state.json', state)
+            write_json(candidate / 'requirement_binding.json', state['page_meta']['input_requirement_binding'])
+        elif target_layout:
             from src.utils.architect_target_layout import compile_architect_target_layout
             from src.agents.frozen_region_planner import frozen_inventory, inventory_hash
             from src.utils.pipeline_trace import PipelineTrace
@@ -250,11 +265,11 @@ def main():
         else:
             state = generate_semantic_page_plan(vision, request=inputs['prompt'], speech=inputs['transcript'],
                 frame=frame, viewport=viewport, image_data_url=image_url, client=planned, model=model, output=candidate)
-        if len(planned.calls) != (0 if projection or target_layout else 1):
+        if len(planned.calls) != (min(1, manifest['requirement_slot_count']) if requirements else 0 if projection or target_layout else 1):
             raise ValueError('Candidate call count differs from declared mode')
         (candidate / 'final_code.html').write_text(render_controlled_components(state), encoding='utf-8')
         manifest['candidate_status'] = 'html_generated_pending_semantic_and_browser_review'
-        if args.candidate_mode not in {'architect-same-frame-v1', 'architect-target-layout-v1'}:
+        if args.candidate_mode not in {'architect-same-frame-v1', 'architect-target-layout-v1', 'full-frame-requirements-v1'}:
             manifest['semantic_plan_status'] = state['page_meta'].get('semantic_plan', state['page_meta'].get('frozen_inventory_layout', {}))['status']
             manifest['region_layout_status'] = state['page_meta']['region_layout']['status']
     except Exception as exc:
@@ -268,7 +283,7 @@ def main():
         request_elapsed_seconds=sum(c['elapsed_seconds'] for c in calls),
         finished_utc=datetime.now(timezone.utc).isoformat(),
         runs=[{'folder': str(baseline)}, {'folder': str(candidate)}])
-    frozen = projection or target_layout or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}
+    frozen = projection or target_layout or requirements or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}
     if projection or target_layout:
         manifest['call_accounting'] = {'physical_cap': 2, 'shared_vision_and_architecture': 2, 'baseline_exclusive': 0, 'candidate_exclusive': 0, 'baseline_effective': 2, 'candidate_effective': 2}
     manifest['planned_call_accounting'] = manifest['call_accounting']
