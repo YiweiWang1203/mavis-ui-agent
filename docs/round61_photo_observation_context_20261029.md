@@ -13,3 +13,7 @@
 
 5. 工程门槛：默认legacy请求不变；候选文本由真实照片尺寸构造且不含目标尺寸/原口述；输入模式未知即拒绝；源码/输入/原始请求响应/校验/所有源端点与叠图保留。原UV与相同冻结输入3哈希。两个失败保留，无额外采样。
 6. 若照片坐标有证据改善，再冻结观察模式，下一轮接同一1440×900的页面参考范围—区域—元素映射；未改善重新定位照片几何生产方式，不调整提示/阈值继续试。无闭合外框不阻塞内容范围取证。13例仍开发、同实施者非独立人工、冻结评分不改。
+
+## 工程与启动回执
+
+本机34通过/1因缺dotenv原生依赖跳过，未安装；Ubuntu原UV35项全部通过、0跳过，才启动模型。代码cda58758605847f8c5423a0f1f9ad7e6428bb902已推送。独立检出/wyw/meeting_agent_workspace/my_agent_photo_observation_cda5875，原UV解释器/wyw/meeting_agent_workspace/my_agent/.venv/bin/python；PID149244，UTC01:15:48 run.json为running；实际批次/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round61_20261029T011543Z_photo_observation/results/20261029T011547Z_fe43aca4，预期ZIP/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round61_20261029T011543Z_photo_observation/results.zip，日志/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round61_20261029T011543Z_photo_observation.worker.log。3项输入哈希与60相同。两个新视觉请求上限，不在本次继续验收或重跑61。坐标叠图仅诊断，非新HTML页面。
