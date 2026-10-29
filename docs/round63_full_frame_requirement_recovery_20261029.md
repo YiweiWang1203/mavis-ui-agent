@@ -10,3 +10,7 @@
 主验收：原文明确要求的主聊天输入实际填入读回1/1；搜索不替代。绑定语义逐槽审查，未决/原生已有另报；若基线已1/1只记保持，若缺身份不得补造。固定七入口逐项实操，保持所有基线可操作项、PC1440×900、位置/尺寸/身份/文字/父关系一致、0新增越界/遮挡。输入变可编辑不保证发送后端或整个聊天页可用；既有历史/语音遮挡及消息遗漏完整保留。无HTML不填操作分。
 5. 先检查保护器及冻结绑定器，再独立检出真实生成，保存原请求响应、源哈希、接受/未决、UI-State、HTML和浏览器截图。
 6. 有效只保留可选输入机制，之后针对缺失语义或区域职责选一项；无效按绑定/类型/渲染定位，不重采样或放宽引文规则。单例开发、同实施者非独立复核，冻结论文评分不改。
+
+
+## 实际启动
+代码 94de0384fbfd6a3694c3715101782889c9ad7aaf 已推送；本地56检查、Ubuntu适用门槛41检查均通过，0跳过，无安装。UTC02:12:44运行，原UV /wyw/meeting_agent_workspace/my_agent/.venv/bin/python，PID150544。独立检出 /wyw/meeting_agent_workspace/my_agent_full_frame_requirements_94de038；状态 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round63_20261029T021241Z_full_frame_requirements；实际批次 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round63_20261029T021241Z_full_frame_requirements/results/20261029T021244Z_68fccd25；预期ZIP /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round63_20261029T021241Z_full_frame_requirements/results.zip；日志 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round63_20261029T021241Z_full_frame_requirements.worker.log。三个冻结输入哈希见current_remote.json，均核对一致。最多3物理调用，零重试，效果待下一次验收，不同次连跑。
