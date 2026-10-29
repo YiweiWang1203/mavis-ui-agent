@@ -212,7 +212,7 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
 
 
 @traced_stage('architect.generate')
-def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None, image_data_url: str | None = None) -> dict:
+def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None, image_data_url: str | None = None, *, attach_observation_image: bool = False) -> dict:
     """Fuse user intent and validated vision data into a UI-State JSON contract."""
     structure_mode = os.getenv('UI_STRUCTURE_MODE', 'baseline')
     if structure_mode not in {'baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
@@ -249,12 +249,10 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
 Return the final fused UI-State JSON.
 """
 
-    request_content = user_content
-    if structure_mode in {'hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
-        if not isinstance(image_data_url, str) or not image_data_url.startswith('data:image/') or ';base64,' not in image_data_url:
-            raise ValueError('Image-grounded architect requires the existing image data URL')
-        request_content = [{'type':'text','text':user_content},
-                           {'type':'image_url','image_url':{'url':image_data_url}}]
+    from src.utils.architect_image_context import architect_request_content
+    request_content = architect_request_content(user_content, structure_mode, image_data_url,
+                                               attach_observation_image=attach_observation_image)
+    if isinstance(request_content, list):
         import hashlib
         trace_event('architect.image_context', provided=True,
                     data_url_sha256=hashlib.sha256(image_data_url.encode('utf-8')).hexdigest(),

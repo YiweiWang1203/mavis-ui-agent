@@ -44,7 +44,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--case', type=Path, required=True)
     parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1', 'desktop-chat-scaffold-v1'), default='semantic-page-v1')
+    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1', 'desktop-chat-scaffold-v1', 'architect-same-frame-v1'), default='semantic-page-v1')
     args = parser.parse_args()
     projection = args.candidate_mode in {'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1'}
     role_anchor = args.candidate_mode == 'projection-input-slots-v1'
@@ -132,7 +132,25 @@ def main():
         manifest['shared_vision_sha256'] = sha256(vision_path)
         manifest['same_image_url_sha256'] = image_hash
         planned.stage = args.candidate_mode
-        if projection or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
+        if args.candidate_mode == 'architect-same-frame-v1':
+            from unittest.mock import patch
+            from src.agents import ui_architect
+            from src.utils.pipeline_trace import PipelineTrace
+            intent = inputs['prompt'] + '\n\n[Spoken transcript]\n' + inputs['transcript']
+            with patch.object(ui_architect, '_get_openai_client', return_value=planned), \
+                 PipelineTrace(candidate / 'pipeline_trace', {'entrypoint': 'architect_same_frame', 'shared_vision_sha256': sha256(vision_path)}):
+                state = ui_architect.generate_ui_state(intent, vision, image_data_url=image_url,
+                                                       attach_observation_image=True)
+            write_json(candidate / 'ui_state.json', state)
+            base_request = upstream.calls[1]['request']['messages']
+            candidate_request = planned.calls[0]['request']['messages']
+            if base_request[0] != candidate_request[0] or base_request[1]['content'] != candidate_request[1]['content'][0]['text']:
+                raise ValueError('Architect comparison changed system or user text')
+            if planned.calls[0]['request_image_url_sha256'] != [image_hash]:
+                raise ValueError('Architect did not receive the exact fresh vision image')
+            manifest['input_isolation_verified'] = True
+            manifest['shared_architect_prompt_sha256'] = hashlib.sha256(base_request[0]['content'].encode()).hexdigest()
+        elif projection or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
             from src.agents.frozen_region_planner import generate_frozen_region_plan, frozen_inventory, inventory_hash
             if not (baseline / 'ui_state.json').is_file():
                 raise ValueError('Fresh baseline semantic inventory required; no historical fallback')
@@ -203,8 +221,9 @@ def main():
             raise ValueError('Candidate call count differs from declared mode')
         (candidate / 'final_code.html').write_text(render_controlled_components(state), encoding='utf-8')
         manifest['candidate_status'] = 'html_generated_pending_semantic_and_browser_review'
-        manifest['semantic_plan_status'] = state['page_meta'].get('semantic_plan', state['page_meta'].get('frozen_inventory_layout', {}))['status']
-        manifest['region_layout_status'] = state['page_meta']['region_layout']['status']
+        if args.candidate_mode != 'architect-same-frame-v1':
+            manifest['semantic_plan_status'] = state['page_meta'].get('semantic_plan', state['page_meta'].get('frozen_inventory_layout', {}))['status']
+            manifest['region_layout_status'] = state['page_meta']['region_layout']['status']
     except Exception as exc:
         manifest['candidate_status'] = 'validation_or_generation_failed' if planned.calls else 'not_evaluated_upstream_failed'
         manifest['candidate_error_type'] = type(exc).__name__
