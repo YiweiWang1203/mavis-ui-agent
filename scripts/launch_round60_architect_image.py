@@ -59,13 +59,13 @@ def main():
     parser.add_argument('--round', type=int, default=60)
     parser.add_argument('--worker', choices=['scripts/run_semantic_plan_comparison.py','scripts/run_vision_observation_comparison.py'], default='scripts/run_semantic_plan_comparison.py')
     parser.add_argument('--candidate-mode', default='architect-same-frame-v1')
-    parser.add_argument('--checkout-name', choices=['architect_same_frame','photo_observation','target_layout','full_frame_requirements'],default='architect_same_frame')
+    parser.add_argument('--checkout-name', choices=['architect_same_frame','photo_observation','target_layout','full_frame_requirements','spoken_editor_completion'],default='architect_same_frame')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     previous = json.loads((root/'outputs/optimization_cycles/current_remote.json').read_text(encoding='utf-8'))
     cfg = {'head': args.head, 'bundle_sha256': args.bundle_sha256,
            'round': args.round,'worker':args.worker,'candidate_mode':args.candidate_mode,'checkout_name':args.checkout_name,
-           'previous_state':previous['remote_state'],'extra_tests':(['tests.test_vision_observation_context'] if args.round==61 else ['tests.test_architect_target_layout','tests.test_coordinate_contract'] if args.round==62 else ['tests.test_input_requirement_binder','tests.test_requirement_recovery_guard'] if args.round==63 else []),
+           'previous_state':previous['remote_state'],'extra_tests':(['tests.test_vision_observation_context'] if args.round==61 else ['tests.test_architect_target_layout','tests.test_coordinate_contract'] if args.round==62 else ['tests.test_input_requirement_binder','tests.test_requirement_recovery_guard'] if args.round==63 else ['tests.test_spoken_editor_completion'] if args.round==64 else []),
            'stamp': datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'),
            'input_sha256': {k: previous['input_'+k+'_sha256'] for k in ('image','transcript','prompt')}}
     # The first stdin line is configuration; the remaining script is executable source.

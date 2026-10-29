@@ -44,14 +44,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--case', type=Path, required=True)
     parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1', 'desktop-chat-scaffold-v1', 'architect-same-frame-v1', 'architect-target-layout-v1', 'full-frame-requirements-v1'), default='semantic-page-v1')
+    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1', 'desktop-chat-scaffold-v1', 'architect-same-frame-v1', 'architect-target-layout-v1', 'full-frame-requirements-v1', 'spoken-editor-completion-v1'), default='semantic-page-v1')
     args = parser.parse_args()
     projection = args.candidate_mode in {'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1'}
     role_anchor = args.candidate_mode == 'projection-input-slots-v1'
     footprints = args.candidate_mode == 'projection-button-footprints-v1'
     scaffold = args.candidate_mode == 'desktop-chat-scaffold-v1'
     paired_projection = role_anchor or footprints or scaffold
-    requirements = args.candidate_mode == 'full-frame-requirements-v1'
+    requirements = args.candidate_mode in {'full-frame-requirements-v1', 'spoken-editor-completion-v1'}
     target_layout = args.candidate_mode == 'architect-target-layout-v1'
     cap = 2 if projection or target_layout else 3
     inputs = load_inputs(args.case.resolve(), 'M2')
@@ -154,11 +154,18 @@ def main():
             manifest['candidate_compiler_attempted'] = True
             manifest['requirement_slot_count'] = len(input_requirement_slots(inputs['transcript'])[0])
             with PipelineTrace(candidate / 'pipeline_trace', {'entrypoint': 'frozen_requirement_recovery'}):
-                bound = bind_input_requirements(baseline_state, vision, inputs['transcript'], model, planned)
-                state = compile_spoken_inputs(bound, vision, inputs['transcript'])
-            manifest['recovery_guard'] = validate_requirement_recovery(baseline_state, state)
+                if args.candidate_mode == 'spoken-editor-completion-v1':
+                    from src.agents.spoken_editor_completion import complete_spoken_editors
+                    state = complete_spoken_editors(baseline_state, inputs['transcript'], image_data_url=image_url, frame_sha256=frame['sha256'], client=planned, model=model)
+                else:
+                    bound = bind_input_requirements(baseline_state, vision, inputs['transcript'], model, planned)
+                    state = compile_spoken_inputs(bound, vision, inputs['transcript'])
+            if args.candidate_mode == 'full-frame-requirements-v1':
+                manifest['recovery_guard'] = validate_requirement_recovery(baseline_state, state)
+                write_json(candidate / 'requirement_binding.json', state['page_meta']['input_requirement_binding'])
+            else:
+                write_json(candidate / 'spoken_editor_completion.json', state['page_meta']['spoken_editor_completion'])
             write_json(candidate / 'ui_state.json', state)
-            write_json(candidate / 'requirement_binding.json', state['page_meta']['input_requirement_binding'])
         elif target_layout:
             from src.utils.architect_target_layout import compile_architect_target_layout
             from src.agents.frozen_region_planner import frozen_inventory, inventory_hash
@@ -269,7 +276,7 @@ def main():
             raise ValueError('Candidate call count differs from declared mode')
         (candidate / 'final_code.html').write_text(render_controlled_components(state), encoding='utf-8')
         manifest['candidate_status'] = 'html_generated_pending_semantic_and_browser_review'
-        if args.candidate_mode not in {'architect-same-frame-v1', 'architect-target-layout-v1', 'full-frame-requirements-v1'}:
+        if args.candidate_mode not in {'architect-same-frame-v1', 'architect-target-layout-v1', 'full-frame-requirements-v1', 'spoken-editor-completion-v1'}:
             manifest['semantic_plan_status'] = state['page_meta'].get('semantic_plan', state['page_meta'].get('frozen_inventory_layout', {}))['status']
             manifest['region_layout_status'] = state['page_meta']['region_layout']['status']
     except Exception as exc:
