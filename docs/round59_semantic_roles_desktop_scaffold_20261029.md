@@ -12,3 +12,7 @@
 主验收：九角色逐槽语义和来源支持；固定6条区域关系（返回/搜索在侧栏顶部、历史在侧栏、资料在侧栏底、会话在右主体、输入及附件语音发送属于右下组合区、输入在工具上方）逐条报分子/6，缺失不跳过。主输入实际填写1/1、固定七点击分开报告；0新增越界/重叠/裁字，全部尺寸吻合、原子按钮尺寸策略相同。截图判断输入区是否成组、左右归属和过大区块是否改善；比例默认合理不等于真实草图比例恢复。任何错绑/丢对象/操作退化则整体不通过。缺消息/双方头像、个人资料无业务、发送仅标签提示继续单列，不把模板生成称所有融合解决。
 5. 实施检查与真实新生成待记录；保存所有绑定原始请求/响应/解析/原文span/区域plan及账本，不追问重试。
 6. 若角色职责仍契约失败或错绑，先定位证据，不叠可选字段救；若有效，冻结后再检验手机/其他开发例适用边界，不能把电脑专用模板强套手机。002开发、同实施者非独立人工，冻结评分不改。
+
+## 实施与启动回执
+
+本机88/Ubuntu原UV88检查与语法通过，工程非效果；首次合成夹具改ID未更新source_refs被不可变校验正确拒绝，修正夹具来源未放宽生产校验。代码fdf571db77312ca3c1333fdaf5cbae4bdd7b1177已推送；独立检出/wyw/meeting_agent_workspace/my_agent_chat_scaffold_fdf571d，原UV3.12.13，无安装，3输入哈希不变。PID147668，UTC00:08:34实际run.json确认running、cap3；状态/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round59_20261029T000834Z_chat_scaffold；实际批次/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round59_20261029T000834Z_chat_scaffold/results/20261029T000834Z_35a84ce5；预期/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round59_20261029T000834Z_chat_scaffold/results.zip；日志/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round59_20261029T000834Z_chat_scaffold.worker.log。当前/设计/窗口/闭环与58终态已保存，下次先查此任务不并发，本次不重复验收59。58原始候选已浏览器实操截图并HTTP200验证预览http://127.0.0.1:8789/candidate_semantic_regions/final_code.html；仅按钮局部改善，不称完整聊天可用。
