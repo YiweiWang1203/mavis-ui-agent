@@ -44,6 +44,16 @@ class Tests(unittest.TestCase):
         g=Guard('clock');g.bind_inputs('001',{'image':'a','transcript':'b'})
         with self.assertRaises(ValueError):g.bind_inputs('001',{'image':'a','transcript':'changed'})
         with self.assertRaises(ValueError):g.check('001','R','vision',{'messages':[],'temperature':.2,'max_tokens':8192})
+    def test_supplement_identity_and_counts(self):
+        from scripts.run_s01_sprint import supplement_context,FLAGS,REFERENCE,STRONG
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]) as d:
+            p=Path(d);prior={'status':'completed_with_failures','service_block':{'http_status':500},'flags':FLAGS,'models':{'R':REFERENCE,'S':STRONG,'D':STRONG},'arms':[{'case':'008','arm':'S','status':'failed'},{'case':'008','arm':'D','status':'NOT_EXECUTED_SERVICE_BLOCKED'}]}
+            (p/'run.json').write_text(json.dumps(prior))
+            self.assertEqual(supplement_context(p),prior)
+            prior['models']['S']='unapproved';(p/'run.json').write_text(json.dumps(prior))
+            with self.assertRaises(ValueError):supplement_context(p)
+        self.assertEqual(terminal([{'status':'failed'},{'status':'NOT_EXECUTED_SERVICE_BLOCKED'}],2),'completed_all_failed')
+        self.assertEqual(counts([],2)['unaccounted'],2)
     def test_sensitive_error_fields(self):
         e=Failure();e.body={'error':{'message':'ordinary billing restriction','code':'https://a/?key=secret','headers':'secret'}}
         v=safe_error(e);self.assertEqual(v['message'],'ordinary billing restriction');self.assertEqual(v['code'],'[REDACTED_SENSITIVE_FIELD]')

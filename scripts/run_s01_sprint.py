@@ -48,17 +48,49 @@ def prepare(project,state):
   write(dst/'case.json',{'image':'image.jpg','transcript':'transcript.txt','prompt':'prompt.txt','transcript_source':m['transcript_source']})
   write(dst/'input_provenance.json',provenance);cases[name]=dst
  return cases
+def supplement_context(parent):
+ prior=json.loads((parent/'run.json').read_text(encoding='utf-8'))
+ if prior['status']!='completed_with_failures' or prior.get('service_block',{}).get('http_status')!=500:
+  raise ValueError('Supplement requires recorded service failure')
+ if prior['flags']!=FLAGS or prior['models']!={'R':REFERENCE,'S':STRONG,'D':STRONG}:
+  raise ValueError('Supplement configuration differs')
+ status={(x['case'],x['arm']):x['status'] for x in prior['arms']}
+ if status.get(('008','S'))!='failed' or status.get(('008','D'))!='NOT_EXECUTED_SERVICE_BLOCKED':
+  raise ValueError('Supplement scope not authorized by original terminal identity')
+ return prior
+
+def seed_supplement_guard(guard,parent):
+ folder=parent/'results/008_R'
+ summary=json.loads((folder/'run_summary.json').read_text(encoding='utf-8'))
+ guard.bind_inputs('008',summary['input_sha256'])
+ effective=(folder/'effective_image.jpg').read_bytes()
+ guard.frozen[('008','effective_image')]=[hashlib.sha256(effective).hexdigest()]
+ manifest=json.loads((folder/'artifact_sha256.json').read_text(encoding='utf-8'))
+ for f in folder.glob('call_*.json'):
+  if digest(f)!=manifest[f.name]:raise ValueError('Parent request hash mismatch')
+  c=json.loads(f.read_text(encoding='utf-8'));req=c['request']
+  for m in req['messages']:
+   if isinstance(m.get('content'),list):
+    for part in m['content']:
+     if part.get('type')=='image_url':part['image_url']['url']='data:image/jpeg;base64,'+base64.b64encode(effective).decode()
+  guard.check('008','R',c['stage'],req)
+
 def main():
- ap=argparse.ArgumentParser();ap.add_argument('--project',type=Path,required=True);ap.add_argument('--state',type=Path,required=True);a=ap.parse_args()
+ ap=argparse.ArgumentParser();ap.add_argument('--project',type=Path,required=True);ap.add_argument('--state',type=Path,required=True);ap.add_argument('--supplement-008-of',type=Path);a=ap.parse_args()
+ selected_cases=('008',) if a.supplement_008_of else ('001','002','008')
+ selected_arms=('S','D') if a.supplement_008_of else ('R','S','D')
+ expected=len(selected_cases)*len(selected_arms)
  a.state.mkdir(parents=True,exist_ok=False)
  run={'experiment':'S01b','started_utc':now(),'worker_pid':os.getpid(),'base_commit':BASE,
       'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
       'python':sys.version,'python_executable':sys.executable,'status':'preparing','flags':FLAGS,
       'max_tokens':8192,'timeout_seconds':600,'sdk_retries':0,'max_concurrent_arms':1,
-      'updated_at':now(),'counts':counts([]),'current_arm':None,'current_stage':None,
+      'updated_at':now(),'counts':counts([],expected),'current_arm':None,'current_stage':None,
       'models':{'R':REFERENCE,'S':STRONG,'D':STRONG},'arms':[],'cost_currency':None,'cost_amount':None}
  write(a.state/'run.json',run)
  try:
+  prior=supplement_context(a.supplement_008_of) if a.supplement_008_of else None
+  if prior:run.update(retry_of=str(a.supplement_008_of),retry_parent_commit=prior['commit'],retry_scope=['008_S','008_D'],admission='not_repeated',expected_arms=2)
   from dotenv import dotenv_values
   conf=dotenv_values(a.project/'.env')
   # Only provider fields; never import behavior switches from the dirty primary checkout.
@@ -77,30 +109,35 @@ def main():
   pilot.write_json=write  # Atomic diagnostic files, without changing pipeline semantics.
   from openai import OpenAI
   client=OpenAI(api_key=key,base_url=endpoint,timeout=600,max_retries=0)
-  guard=Guard(run['started_utc'])
+  guard=Guard(prior['prompt_clock'] if prior else run['started_utc'])
+  if prior:seed_supplement_guard(guard,a.supplement_008_of)
   run['prompt_clock']=guard.clock
   class Traced(Transport):
    def __init__(self,output,models,cap,case='probe',arm='probe'):
     super().__init__(client,output,models,cap,guard,run,a.state,case,arm,pilot.safe_messages)
-  probe=a.state/'probe';probe.mkdir()
-  traced=Traced(probe,{'probe_json':STRONG},1)
-  image=base64.b64encode((cases['001']/'image.jpg').read_bytes()).decode()
-  run['status']='probe_running';write(a.state/'run.json',run)
-  traced.stage='probe_json'
-  response=traced.create(model=STRONG,temperature=0,response_format={'type':'json_object'},messages=[
-   {'role':'system','content':'Return a JSON object only.'},
-   {'role':'user','content':[{'type':'text','text':'Briefly describe the visible sketch in one sentence. Return {"description":"..."}. Do not generate a page.'},{'type':'image_url','image_url':{'url':'data:image/jpeg;base64,'+image}}]}])
-  parsed=json.loads(response.choices[0].message.content)
-  if not isinstance(parsed.get('description'),str) or not parsed['description'].strip():raise ValueError('JSON probe contract failed')
-  write(probe/'probe_summary.json',{'status':'admitted','usage':[c['response'].get('usage') for c in traced.calls],'warning':'protocol access only; no page quality conclusion'})
-  run['probe_archive']=pack(probe);run['status']='generating';write(a.state/'run.json',run)
+  if not prior:
+   probe=a.state/'probe';probe.mkdir()
+   traced=Traced(probe,{'probe_json':STRONG},1)
+   image=base64.b64encode((cases['001']/'image.jpg').read_bytes()).decode()
+   run['status']='probe_running';write(a.state/'run.json',run)
+   traced.stage='probe_json'
+   response=traced.create(model=STRONG,temperature=0,response_format={'type':'json_object'},messages=[
+    {'role':'system','content':'Return a JSON object only.'},
+    {'role':'user','content':[{'type':'text','text':'Briefly describe the visible sketch in one sentence. Return {"description":"..."}. Do not generate a page.'},{'type':'image_url','image_url':{'url':'data:image/jpeg;base64,'+image}}]}])
+   parsed=json.loads(response.choices[0].message.content)
+   if not isinstance(parsed.get('description'),str) or not parsed['description'].strip():raise ValueError('JSON probe contract failed')
+   write(probe/'probe_summary.json',{'status':'admitted','usage':[c['response'].get('usage') for c in traced.calls],'warning':'protocol access only; no page quality conclusion'})
+   run['probe_archive']=pack(probe)
+  run['status']='generating';write(a.state/'run.json',run)
   sources={str(p.relative_to(ROOT)):digest(p) for directory in ['src','scripts'] for p in (ROOT/directory).rglob('*') if p.is_file() and p.suffix in {'.py','.md','.json'}}
   write(a.state/'source_sha256.json',sources)
   for case,casepath in cases.items():
+   if case not in selected_cases:continue
    for arm,model,condition in [('R',REFERENCE,'M2'),('S',STRONG,'M2'),('D',STRONG,'direct')]:
+    if arm not in selected_arms:continue
     if guard.blocked or guard.contract_error:
      run['arms'].append({'case':case,'arm':arm,'status':'NOT_EXECUTED_SERVICE_BLOCKED' if guard.blocked else 'NOT_EXECUTED_CONTRACT_BLOCKED'})
-     run['counts']=counts(run['arms']);run['updated_at']=now();write(a.state/'run.json',run)
+     run['counts']=counts(run['arms'],expected);run['updated_at']=now();write(a.state/'run.json',run)
      continue
     folder=a.state/'results'/(case+'_'+arm);folder.mkdir(parents=True)
     models={s:model for s in ['vision','ui_architect','coder','direct']};trace=Traced(folder,models,1 if arm=='D' else 3,case,arm)
@@ -128,20 +165,20 @@ def main():
       usage=[c.get('response',{}).get('usage') for c in trace.calls],response_models=[c.get('response_model') for c in trace.calls])
     write(folder/'run_summary.json',summary)
     artifact=pack(folder);run['arms'].append({'case':case,'arm':arm,'status':summary['status'],'folder':str(folder),**artifact})
-    run['counts']=counts(run['arms']);run['updated_at']=now()
+    run['counts']=counts(run['arms'],expected);run['updated_at']=now()
     write(a.state/'run.json',run)
     print(json.dumps(run['arms'][-1]),flush=True)
-  run['status']=terminal(run['arms']);run['browser_review']='pending' if counts(run['arms'])['success'] else 'no_html'
+  run['status']=terminal(run['arms'],expected);run['browser_review']='pending' if counts(run['arms'],expected)['success'] else 'no_html'
  except Exception as exc:
   run['status']='failed_preparation_or_admission';run['error_type']=type(exc).__name__
   if 'guard' in locals() and guard.blocked:
    known={(x['case'],x['arm']) for x in run['arms']}
-   for case in ('001','002','008'):
-    for arm in ('R','S','D'):
+   for case in selected_cases:
+    for arm in selected_arms:
      if (case,arm) not in known:run['arms'].append({'case':case,'arm':arm,'status':'NOT_EXECUTED_SERVICE_BLOCKED'})
    run['status']='service_blocked_before_generation'
  finally:
-  run['counts']=counts(run['arms']);run['current_arm']=None;run['current_stage']=None
+  run['counts']=counts(run['arms'],expected);run['current_arm']=None;run['current_stage']=None
   run['finished_utc']=now();run['updated_at']=now();write(a.state/'run.json',run)
  return 0 if run['status']=='completed_generation' else 1
 if __name__=='__main__':raise SystemExit(main())
