@@ -17,3 +17,9 @@
 ## 启动回执
 
 代码3d440d5d3206a954b61f230b077262e7fd493803已推送codex/hierarchy-spatial-contract；本机30/Ubuntu原UV30工程检查通过，非效果。独立检出/wyw/meeting_agent_workspace/my_agent_architect_same_frame_3d440d5；PID148494；UTC00:42:13实际run.json为running；输入3哈希与59一致。状态/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round60_20261029T004210Z_architect_same_frame；实际批次/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round60_20261029T004210Z_architect_same_frame/results/20261029T004213Z_ef94088a；预期ZIP/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round60_20261029T004210Z_architect_same_frame/results.zip；日志/wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round60_20261029T004210Z_architect_same_frame.worker.log。未重复启动59；本次启动后不再连跑或提前验收60，下一次先读真实终态和完整证据。
+
+## 终态验收
+
+原包SHA256 7ddeed35f9c9a561bd389d21e1233215d18054ab5a57d5be0bdf37d2186b3cc8及53内部/182源码/3输入哈希通过。3物理请求9648token/170.481726秒；两组system与user文本一致，候选仅增加同一图像，运行隔离检查通过。两组均12对象、相同类型/文字/父边/最终bbox；主输入0/1、消息可辨区域0/2、双方头像正确呈现0/2，未恢复需求。原HTML实操截图前后不变，尺寸12/12、0越界；相关标签提示基线6/7、候选5/7，个人入口匹配由额外修改信息按钮e6改为真实头像e5而触发差异，不能简单当业务退化；两组真实头像均无业务反馈。历史标题仍无反馈，缺消息/输入不由HTML生成完成掩盖。
+
+导师不推广此附图开关，不采样救结果；转向用户最新强调的映射源可靠性：原图手绘在照片下半部，但视觉部分归一化bbox落照片上部，字段canvas正确不代表bbox正确。另有原生身份代码覆盖架构目标bbox的明确证据。下一轮61先隔离观察输入职责，用2次新视觉验证照片坐标忠实度，刻意不生成HTML，不宣称区域/操作提升；通过后才能接1440×900页面/区域映射。

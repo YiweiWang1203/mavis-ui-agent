@@ -233,7 +233,7 @@ def extract_ui_layout(image_path: str,
                       user_context: Optional[str] = None,
                       previous_layout: Optional[dict] = None,
                       repair_feedback: Optional[dict] = None,
-                      audit_logger=None) -> dict:
+                      audit_logger=None, *, context_mode: str = 'legacy') -> dict:
     """Call the vision model and return a normalized VisionLayoutPayload dict.
 
     This function will NOT return a 'validation' field from the model; any incoming
@@ -267,10 +267,12 @@ def extract_ui_layout(image_path: str,
         except Exception:
             client = None
 
+    from src.utils.vision_observation_context import observation_context
+    observation_text = observation_context(user_context, width, height, context_mode)
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": [
-            {"type": "text", "text": user_context or "请完整解析这张 UI 草图。"},
+            {"type": "text", "text": observation_text},
             {"type": "image_url", "image_url": {"url": data_url}}
         ]}
     ]
