@@ -10,3 +10,7 @@
 主验收主聊天输入实际填写读回1/1，逐条核实锚点语义。七任务保留所有基线成功项、无新增遮挡/越界、原位置尺寸身份文字父关系不变；无候选HTML不给分。搜索框不替代。标签提示不等业务完成，聊天消息/头像/分栏/比例问题单列。当前假设只适用显式字面可绑定对象，不宣称解决63缺身份情形。
 5. 工程检查唯一/歧义/缺失/同名/否定/类型冲突、状态不变与保护器；保存前源码、全部原证据、预算、接受未决、浏览器截图。
 6. 成功仅保留可选窄机制并冻结开发回归；若没有触发按前提记录，不反复重采样等出现标签。失败定位编译/渲染，不调阈值。单例开发、同实施者非独立，论文冻结分不改。
+
+
+## 实际启动
+生成代码 b43706001ac4e5c1c1af6a7ba33cd26e2736b6df 已推送；两端44检查通过、0跳过，无安装。北京时间11:12:03启动原UV /wyw/meeting_agent_workspace/my_agent/.venv/bin/python，PID151883。独立检出 /wyw/meeting_agent_workspace/my_agent_unique_requirement_binding_b437060；状态 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round65_20261029T031159Z_unique_requirement_binding；批次 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round65_20261029T031159Z_unique_requirement_binding/results/20261029T031203Z_e39e448c；预期ZIP /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round65_20261029T031159Z_unique_requirement_binding/results.zip；日志 /wyw/meeting_agent_workspace/my_agent/outputs/optimization_cycles/round65_20261029T031159Z_unique_requirement_binding.worker.log。三个冻结输入哈希已核对，见current_remote.json。状态running，最多两共享物理请求，各8192/600秒/零重试；绑定0额外请求。效果待验收，不以工程通过或绑定元数据作收益。
