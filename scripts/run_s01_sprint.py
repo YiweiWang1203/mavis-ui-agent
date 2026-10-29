@@ -15,7 +15,7 @@ FLAGS={'UI_STRUCTURE_MODE':'baseline','UI_FUSION_MODE':'exact_id','LAYOUT_SOLVER
  'UI_RELATION_AGGREGATION_MODE':'off','UI_COORDINATE_RESPONSIBILITY_MODE':'off'}
 def now():return datetime.now(timezone.utc).isoformat()
 def digest(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
-def write(p,x):Path(p).write_text(json.dumps(x,ensure_ascii=False,indent=2,default=str),encoding='utf-8')
+from scripts.s01_transport import atomic_write as write, Guard, Transport, counts, terminal
 def routing_kwargs(stage,kwargs,models):
  if stage not in models:raise ValueError('Unapproved stage '+stage)
  return {**kwargs,'model':models[stage],'max_tokens':8192}
@@ -55,6 +55,7 @@ def main():
       'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
       'python':sys.version,'python_executable':sys.executable,'status':'preparing','flags':FLAGS,
       'max_tokens':8192,'timeout_seconds':600,'sdk_retries':0,'max_concurrent_arms':1,
+      'updated_at':now(),'counts':counts([]),'current_arm':None,'current_stage':None,
       'models':{'R':REFERENCE,'S':STRONG,'D':STRONG},'arms':[],'cost_currency':None,'cost_amount':None}
  write(a.state/'run.json',run)
  try:
@@ -73,24 +74,14 @@ def main():
   os.environ.update(SILICONFLOW_API_KEY=key,SILICONFLOW_BASE_URL=endpoint,VISION_MODEL=REFERENCE,CODER_MODEL=REFERENCE,CODER_PROD_MODEL=REFERENCE)
   cases=prepare(a.project,a.state)
   from scripts import run_pilot_experiment as pilot
+  pilot.write_json=write  # Atomic diagnostic files, without changing pipeline semantics.
   from openai import OpenAI
   client=OpenAI(api_key=key,base_url=endpoint,timeout=600,max_retries=0)
-  class Traced(pilot.TracedClient):
-   def __init__(self,output,models,cap):super().__init__(client,output);self.models=models;self.cap=cap
-   def create(self,**kwargs):
-    if len(self.calls)>=self.cap:raise ValueError('Unexpected extra stage request; stopped')
-    kwargs=routing_kwargs(self.stage,kwargs,self.models)
-    try:
-     response=super().create(**kwargs)
-    finally:
-     if self.calls:
-      c=self.calls[-1];c['requested_model']=kwargs['model'];c['response_model']=c.get('response',{}).get('model')
-      c['system_prompt_sha256']=hashlib.sha256(json.dumps([m for m in kwargs['messages'] if m['role']=='system'],ensure_ascii=False,sort_keys=True).encode()).hexdigest()
-      c['finish_reason']=(c.get('response',{}).get('choices') or [{}])[0].get('finish_reason')
-      pilot.write_json(self.output/f"call_{c['index']:02d}.json",c)
-    if response.choices[0].finish_reason!='stop':raise ValueError('Nonstop finish: '+str(response.choices[0].finish_reason))
-    if not response.choices[0].message.content:raise ValueError('No visible content')
-    return response
+  guard=Guard(run['started_utc'])
+  run['prompt_clock']=guard.clock
+  class Traced(Transport):
+   def __init__(self,output,models,cap,case='probe',arm='probe'):
+    super().__init__(client,output,models,cap,guard,run,a.state,case,arm,pilot.safe_messages)
   probe=a.state/'probe';probe.mkdir()
   traced=Traced(probe,{'probe_json':STRONG,'probe_text':STRONG},2)
   image=base64.b64encode((cases['001']/'image.jpg').read_bytes()).decode()
@@ -110,8 +101,12 @@ def main():
   write(a.state/'source_sha256.json',sources)
   for case,casepath in cases.items():
    for arm,model,condition in [('R',REFERENCE,'M2'),('S',STRONG,'M2'),('D',STRONG,'direct')]:
+    if guard.blocked or guard.contract_error:
+     run['arms'].append({'case':case,'arm':arm,'status':'NOT_EXECUTED_SERVICE_BLOCKED' if guard.blocked else 'NOT_EXECUTED_CONTRACT_BLOCKED'})
+     run['counts']=counts(run['arms']);run['updated_at']=now();write(a.state/'run.json',run)
+     continue
     folder=a.state/'results'/(case+'_'+arm);folder.mkdir(parents=True)
-    models={s:model for s in ['vision','ui_architect','coder','direct']};trace=Traced(folder,models,1 if arm=='D' else 3)
+    models={s:model for s in ['vision','ui_architect','coder','direct']};trace=Traced(folder,models,1 if arm=='D' else 3,case,arm)
     summary={'experiment':'S01','case_id':case,'arm':arm,'condition':condition,'started_utc':now(),'status':'running',
       'commit':run['commit'],'models':models,'renderer':'llm','flags':FLAGS,'source_sha256':sources,'cost_amount':None}
     write(folder/'run_summary.json',summary)
@@ -120,6 +115,9 @@ def main():
      os.environ.update(FLAGS,VISION_MODEL=model,CODER_MODEL=model,CODER_PROD_MODEL=model)
      inputs=pilot.load_inputs(casepath,condition)
      summary['input_sha256']={k:digest(v) for k,v in inputs['files'].items()}
+     try:guard.bind_inputs(case,summary['input_sha256'])
+     except ValueError:
+      guard.contract_error='input_identity_mismatch';raise
      for k,v in inputs['files'].items():shutil.copyfile(v,folder/(k+v.suffix))
      code=pilot.execute(inputs,condition,trace,folder,model)
      if not isinstance(code,str) or '<html' not in code.lower() or '</html>' not in code.lower():raise ValueError('Incomplete HTML')
@@ -133,12 +131,20 @@ def main():
       usage=[c.get('response',{}).get('usage') for c in trace.calls],response_models=[c.get('response_model') for c in trace.calls])
     write(folder/'run_summary.json',summary)
     artifact=pack(folder);run['arms'].append({'case':case,'arm':arm,'status':summary['status'],'folder':str(folder),**artifact})
+    run['counts']=counts(run['arms']);run['updated_at']=now()
     write(a.state/'run.json',run)
     print(json.dumps(run['arms'][-1]),flush=True)
-  run['status']='finished_pending_browser_review'
+  run['status']=terminal(run['arms']);run['browser_review']='pending' if counts(run['arms'])['success'] else 'no_html'
  except Exception as exc:
   run['status']='failed_preparation_or_admission';run['error_type']=type(exc).__name__
+  if 'guard' in locals() and guard.blocked:
+   known={(x['case'],x['arm']) for x in run['arms']}
+   for case in ('001','002','008'):
+    for arm in ('R','S','D'):
+     if (case,arm) not in known:run['arms'].append({'case':case,'arm':arm,'status':'NOT_EXECUTED_SERVICE_BLOCKED'})
+   run['status']='service_blocked_before_generation'
  finally:
-  run['finished_utc']=now();write(a.state/'run.json',run)
- return 0 if run['status']=='finished_pending_browser_review' else 1
+  run['counts']=counts(run['arms']);run['current_arm']=None;run['current_stage']=None
+  run['finished_utc']=now();run['updated_at']=now();write(a.state/'run.json',run)
+ return 0 if run['status']=='completed_generation' else 1
 if __name__=='__main__':raise SystemExit(main())
