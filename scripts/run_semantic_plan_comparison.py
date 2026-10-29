@@ -44,14 +44,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--case', type=Path, required=True)
     parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1', 'desktop-chat-scaffold-v1', 'architect-same-frame-v1'), default='semantic-page-v1')
+    parser.add_argument('--candidate-mode', choices=('semantic-page-v1', 'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1', 'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1', 'desktop-chat-scaffold-v1', 'architect-same-frame-v1', 'architect-target-layout-v1'), default='semantic-page-v1')
     args = parser.parse_args()
     projection = args.candidate_mode in {'projection-flow-v1', 'projection-input-slots-v1', 'projection-button-footprints-v1'}
     role_anchor = args.candidate_mode == 'projection-input-slots-v1'
     footprints = args.candidate_mode == 'projection-button-footprints-v1'
     scaffold = args.candidate_mode == 'desktop-chat-scaffold-v1'
     paired_projection = role_anchor or footprints or scaffold
-    cap = 2 if projection else 3
+    target_layout = args.candidate_mode == 'architect-target-layout-v1'
+    cap = 2 if projection or target_layout else 3
     inputs = load_inputs(args.case.resolve(), 'M2')
     state_dir = args.state.resolve()
     state_dir.mkdir(parents=True, exist_ok=False)
@@ -97,13 +98,24 @@ def main():
         'max_tokens_per_stage': 8192, 'timeout_seconds': 600, 'max_retries': 0,
         'baseline_status': 'not_generated', 'candidate_status': 'not_generated',
         'device_request_added_equally': True, 'output_html_repair': False, 'behavior_evaluated': False}
-    if projection or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
+    if projection or target_layout or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}:
         manifest['call_accounting'] = {'physical_cap': cap, 'shared_vision_and_architecture': 2,
-            'baseline_exclusive': 0, 'candidate_exclusive': 0 if projection else 1, 'baseline_effective': 2, 'candidate_effective': 2 if projection else 3}
+            'baseline_exclusive': 0, 'candidate_exclusive': 0 if projection or target_layout else 1, 'baseline_effective': 2, 'candidate_effective': 2 if projection or target_layout else 3}
     write_json(batch / 'batch.json', manifest)
     try:
         try:
-            code = execute(inputs, 'M2', upstream, shared, model)
+            if target_layout:
+                from unittest.mock import patch
+                from src.agents import ui_architect
+                import copy
+                native_finalize = ui_architect.finalize_ui_state
+                def capture_fresh_pre_finalize(raw_state, *args, **kwargs):
+                    write_json(shared / 'architect_pre_finalize.json', copy.deepcopy(raw_state))
+                    return native_finalize(raw_state, *args, **kwargs)
+                with patch.object(ui_architect, 'finalize_ui_state', side_effect=capture_fresh_pre_finalize):
+                    code = execute(inputs, 'M2', upstream, shared, model)
+            else:
+                code = execute(inputs, 'M2', upstream, shared, model)
             if isinstance(code, str) and '<html' in code.lower() and '</html' in code.lower():
                 shutil.copyfile(shared / 'ui_state.json', baseline / 'ui_state.json')
                 if not paired_projection:
@@ -132,7 +144,28 @@ def main():
         manifest['shared_vision_sha256'] = sha256(vision_path)
         manifest['same_image_url_sha256'] = image_hash
         planned.stage = args.candidate_mode
-        if args.candidate_mode == 'architect-same-frame-v1':
+        if target_layout:
+            from src.utils.architect_target_layout import compile_architect_target_layout
+            from src.agents.frozen_region_planner import frozen_inventory, inventory_hash
+            from src.utils.pipeline_trace import PipelineTrace
+            raw_path = shared / 'architect_pre_finalize.json'
+            manifest['candidate_compiler_attempted'] = True
+            if not raw_path.is_file() or not (baseline / 'ui_state.json').is_file():
+                raise ValueError('Fresh pre-finalize state and successful baseline required')
+            raw_state = json.loads(raw_path.read_text(encoding='utf-8'))
+            write_json(candidate / 'shared_pre_finalize.json', raw_state)
+            manifest['shared_pre_finalize_sha256'] = sha256(raw_path)
+            if manifest['shared_pre_finalize_sha256'] != sha256(candidate / 'shared_pre_finalize.json'):
+                raise ValueError('Fresh pre-finalize snapshot differs')
+            with PipelineTrace(candidate / 'pipeline_trace', {'entrypoint': 'architect_target_layout', 'fresh_snapshot_sha256': sha256(raw_path)}):
+                state = compile_architect_target_layout(raw_state, vision, frame=frame, viewport=viewport)
+            baseline_state = json.loads((baseline / 'ui_state.json').read_text(encoding='utf-8'))
+            if frozen_inventory(state) != frozen_inventory(baseline_state):
+                raise ValueError('Target layout comparison changed semantic inventory')
+            manifest['immutable_inventory_sha256'] = inventory_hash(frozen_inventory(state))
+            write_json(candidate / 'ui_state.json', state)
+            write_json(candidate / 'geometry_conflicts.json', state['page_meta']['architect_target_layout'])
+        elif args.candidate_mode == 'architect-same-frame-v1':
             from unittest.mock import patch
             from src.agents import ui_architect
             from src.utils.pipeline_trace import PipelineTrace
@@ -217,15 +250,15 @@ def main():
         else:
             state = generate_semantic_page_plan(vision, request=inputs['prompt'], speech=inputs['transcript'],
                 frame=frame, viewport=viewport, image_data_url=image_url, client=planned, model=model, output=candidate)
-        if len(planned.calls) != (0 if projection else 1):
+        if len(planned.calls) != (0 if projection or target_layout else 1):
             raise ValueError('Candidate call count differs from declared mode')
         (candidate / 'final_code.html').write_text(render_controlled_components(state), encoding='utf-8')
         manifest['candidate_status'] = 'html_generated_pending_semantic_and_browser_review'
-        if args.candidate_mode != 'architect-same-frame-v1':
+        if args.candidate_mode not in {'architect-same-frame-v1', 'architect-target-layout-v1'}:
             manifest['semantic_plan_status'] = state['page_meta'].get('semantic_plan', state['page_meta'].get('frozen_inventory_layout', {}))['status']
             manifest['region_layout_status'] = state['page_meta']['region_layout']['status']
     except Exception as exc:
-        manifest['candidate_status'] = 'validation_or_generation_failed' if planned.calls else 'not_evaluated_upstream_failed'
+        manifest['candidate_status'] = 'validation_or_generation_failed' if planned.calls or manifest.get('candidate_compiler_attempted') else 'not_evaluated_upstream_failed'
         manifest['candidate_error_type'] = type(exc).__name__
         if isinstance(exc, ValueError):
             manifest['candidate_validation_reason'] = str(exc)
@@ -235,8 +268,8 @@ def main():
         request_elapsed_seconds=sum(c['elapsed_seconds'] for c in calls),
         finished_utc=datetime.now(timezone.utc).isoformat(),
         runs=[{'folder': str(baseline)}, {'folder': str(candidate)}])
-    frozen = projection or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}
-    if projection:
+    frozen = projection or target_layout or scaffold or args.candidate_mode in {'frozen-regions-v1', 'symbolic-flow-v1', 'symbolic-flat-v1'}
+    if projection or target_layout:
         manifest['call_accounting'] = {'physical_cap': 2, 'shared_vision_and_architecture': 2, 'baseline_exclusive': 0, 'candidate_exclusive': 0, 'baseline_effective': 2, 'candidate_effective': 2}
     manifest['planned_call_accounting'] = manifest['call_accounting']
     manifest['realized_call_accounting'] = realized_accounting(upstream.calls, planned.calls, frozen)
