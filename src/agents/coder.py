@@ -25,7 +25,9 @@ def _get_openai_client():
         return None
     from openai import OpenAI
 
-    return OpenAI(api_key=api_key, base_url=DEFAULT_BASE_URL)
+    from src.utils.region_tree_contract import enabled as region_tree_enabled
+    return OpenAI(api_key=api_key, base_url=DEFAULT_BASE_URL,
+                  **({'max_retries':0,'timeout':600} if region_tree_enabled() else {}))
 
 
 def read_coder_prompt():
@@ -36,6 +38,10 @@ def read_coder_prompt():
     except FileNotFoundError:
         prompt = "Generate a complete runnable HTML file from the provided UI-State JSON."
     mode = os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower()
+    from src.utils.region_tree_contract import enabled as region_tree_enabled, neutral_instructions
+    if region_tree_enabled():
+        return prompt_path.with_name('coder_region_tree_v1.md').read_text(encoding='utf-8') + neutral_instructions()
+    prompt += neutral_instructions()
     if mode in {"baseline", "placement_v1", "typed_controls_v1"}:
         return prompt
     if mode != "native_controls_v1":
@@ -72,6 +78,10 @@ def save_html_asset(code: str) -> str | None:
 def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str:
     """Generate runnable frontend HTML from a UI-State JSON contract."""
     renderer_mode = os.getenv("UI_RENDERER_MODE", "auto").strip().lower()
+    from src.utils.region_tree_contract import enabled as region_tree_enabled
+    if region_tree_enabled():
+        if renderer_mode != 'llm' or ui_state_json.get('region_layout',{}).get('version')!='region-flex-v1':
+            raise ValueError('REGION_CODER_REQUIRES_COMPILED_LAYOUT_AND_LLM')
     # Reject the retired artifact-repair switch instead of silently altering HTML.
     if os.getenv("UI_INPUT_CONTRACT_MODE", "off").strip().lower() != "off":
         raise ValueError("HTML repair is retired; unset UI_INPUT_CONTRACT_MODE")
@@ -124,6 +134,7 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
                 {"role": "user", "content": user_content},
             ],
             temperature=0.2,
+            **({'max_tokens':8192,'timeout':600} if region_tree_enabled() else {}),
         )
 
         raw_code = response.choices[0].message.content or ""

@@ -291,6 +291,10 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
             system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_node_evidence.md').read_text(encoding='utf-8')
     else:
         system_prompt = read_ui_architect_prompt()
+    from src.utils.region_tree_contract import enabled as region_tree_enabled
+    if region_tree_enabled():
+        from pathlib import Path
+        system_prompt = (Path(__file__).resolve().parents[1]/'prompts/ui_architect_region_tree_v1.md').read_text(encoding='utf-8')
     semantic_mode=os.getenv('UI_SEMANTIC_TYPE_MODE','off')
     if semantic_mode not in {'off','declare_spoken_input_v1','spoken_input_v1'}:
         raise ValueError('Unsupported semantic type mode')
@@ -330,6 +334,7 @@ Return the final fused UI-State JSON.
             ],
             temperature=0.3,
             response_format={"type": "json_object"},
+            **({'max_tokens':8192,'timeout':600} if region_tree_enabled() else {}),
         )
 
         raw_json_str = response.choices[0].message.content
@@ -366,6 +371,10 @@ Return the final fused UI-State JSON.
 
 @traced_stage('architect.finalize')
 def finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, preferred_locale=None):
+    from src.utils.region_tree_contract import enabled as region_tree_enabled, compile_region_tree
+    if region_tree_enabled():
+        if structure_mode != 'baseline':raise ValueError('CONFLICTING_STRUCTURE_ARGUMENT')
+        return compile_region_tree(ui_state, vision_elements, user_intent)
     if os.getenv('UI_SEMANTIC_TYPE_MODE','off')=='spoken_input_v1':
         from src.utils.spoken_input_evidence import compile_spoken_inputs
         ui_state=compile_spoken_inputs(ui_state,vision_elements,user_intent)
