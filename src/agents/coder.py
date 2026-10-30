@@ -38,12 +38,42 @@ def read_coder_prompt():
     mode = os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower()
     if mode in {"baseline", "placement_v1", "typed_controls_v1"}:
         return prompt
+    if mode == "behavior_feedback_v1":
+        return behavior_feedback_prompt(prompt, prompt_path)
     if mode == "functional_content_v1":
         return prompt + "\n\n" + prompt_path.with_name("coder_functional_content.md").read_text(encoding="utf-8")
     if mode != "native_controls_v1":
         raise ValueError("UI_CODER_CONTRACT_MODE must be baseline, native_controls_v1, placement_v1 or typed_controls_v1")
     contract_path = prompt_path.with_name("coder_native_controls.md")
     return prompt + "\n\n" + contract_path.read_text(encoding="utf-8")
+
+
+def behavior_feedback_prompt(prompt, prompt_path):
+    """Replace conflicting mock-only responsibilities, keep geometry contract."""
+    replacements = {
+        "- `rpa_action`: optional action id to bind to a mock click handler.": "- `rpa_action`: existing action identity to implement through visible local prototype state, subject to original evidence.",
+        "11. If an element has `rpa_action`, bind `onclick=\"handleRPA('action_id')\"`.": "11. Bind user-operated rpa_action targets to the relevant visible prototype state transition; display-only roles remain non-interactive.",
+        "12. Include a small `handleRPA(action)` JavaScript function.": "12. Include a working action dispatcher and the local visible states it consumes; logging alone is not an implementation.",
+    }
+    for old, new in replacements.items():
+        if prompt.count(old) != 1:
+            raise ValueError("BEHAVIOR_BASE_CONTRACT_DRIFT:" + old)
+        prompt = prompt.replace(old, new)
+    functional = prompt_path.with_name("coder_functional_content.md").read_text(encoding="utf-8")
+    old = "Do not add business behavior, media replacement, model calls, or extra user requirements."
+    if functional.count(old) != 1:
+        raise ValueError("BEHAVIOR_FUNCTIONAL_CONTRACT_DRIFT")
+    functional = functional.replace(old, "Do not change media, add model calls or extra user requirements. Existing user-operated actions follow the visible prototype state consumer contract below.")
+    return prompt + "\n\n" + functional + "\n\n" + prompt_path.with_name("coder_behavior_feedback.md").read_text(encoding="utf-8")
+
+
+def build_coder_user_content(ui_state_json, original_evidence=None):
+    content = "Generate runnable frontend code from the following UI-State JSON.\n\n" + json.dumps(ui_state_json, ensure_ascii=False, indent=2)
+    if original_evidence is not None:
+        if not isinstance(original_evidence, str) or not original_evidence.strip():
+            raise ValueError("ORIGINAL_EVIDENCE_MUST_BE_NONEMPTY_TEXT")
+        content += "\n\nOriginal user ASR evidence (may contain transcription uncertainty; not evaluation answers):\n" + original_evidence
+    return content
 
 
 def strip_markdown_code_fence(code: str) -> str:
@@ -71,7 +101,7 @@ def save_html_asset(code: str) -> str | None:
 
 
 @traced_stage('coder.generate', fields={'ui_state_json'})
-def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str:
+def generate_frontend_code(ui_state_json: dict, audit_logger=None, original_evidence=None) -> dict | str:
     """Generate runnable frontend HTML from a UI-State JSON contract."""
     renderer_mode = os.getenv("UI_RENDERER_MODE", "auto").strip().lower()
     # Reject the retired artifact-repair switch instead of silently altering HTML.
@@ -106,10 +136,7 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
     if os.getenv("UI_CODER_CONTRACT_MODE", "baseline") == "typed_controls_v1":
         from src.utils.placement_contract import component_instructions
         system_prompt += component_instructions(ui_state_json)
-    user_content = (
-        "Generate runnable frontend code from the following UI-State JSON.\n\n"
-        f"{json.dumps(ui_state_json, ensure_ascii=False, indent=2)}"
-    )
+    user_content = build_coder_user_content(ui_state_json, original_evidence)
     model_to_use = os.getenv("CODER_MODEL", DEFAULT_CODER_MODEL)
 
     client = _get_openai_client()
