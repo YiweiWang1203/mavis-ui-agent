@@ -34,22 +34,45 @@ def number(value, name, minimum=0):
     return value
 
 
+def locate_quote(quote, intent):
+    """Exact, unique source location; not a judgment of semantic support."""
+    result={'quote':quote,'semantic_support':'UNKNOWN',
+            'source_scope':'provided_user_intent_not_independent_asr_channel'}
+    if not isinstance(quote,str) or not quote.strip():
+        return dict(result,status='UNKNOWN_INVALID_QUOTE',occurrences=0)
+    starts=[];offset=0
+    while True:
+        start=intent.find(quote,offset)
+        if start<0:break
+        starts.append(start);offset=start+1
+    if len(starts)!=1:
+        return dict(result,status='UNKNOWN_QUOTE_ABSENT' if not starts else 'UNKNOWN_QUOTE_AMBIGUOUS',occurrences=len(starts))
+    return dict(result,status='UNIQUE_EXACT_QUOTE',occurrences=1,start=starts[0],end=starts[0]+len(quote))
+
+
 def evidence(items, intent, visual_ids, root=False):
-    if root and items==[{'source':'system_root'}]:return
+    if root and items==[{'source':'system_root'}]:return copy.deepcopy(items)
     if not isinstance(items,list) or not items:raise ValueError('MISSING_RELATION_EVIDENCE')
+    resolved=[]
     for item in items:
+        if not isinstance(item,dict):raise ValueError('INVALID_EVIDENCE_ITEM')
         source=item.get('source')
         if source=='asr':
-            start,end=item.get('start'),item.get('end');quote=item.get('quote')
-            if type(start)!=int or type(end)!=int or not 0<=start<end<=len(intent) or not quote or intent[start:end]!=quote:
-                raise ValueError('ASR_QUOTE_NOT_IN_SOURCE')
+            if set(item)!={'source','quote'}:raise ValueError('QUOTE_ONLY_SOURCE_REQUIRED_NO_MODEL_OFFSETS')
+            location=locate_quote(item.get('quote'),intent)
+            trace_event('region_tree.quote_location',location=location)
+            if location['status']!='UNIQUE_EXACT_QUOTE':raise ValueError(location['status'])
+            resolved.append(dict(location,source='asr'))
         elif source=='sketch':
             refs=item.get('visual_ids')
             if not isinstance(refs,list) or not refs or any(x not in visual_ids for x in refs) or not item.get('reason'):
                 raise ValueError('INVALID_SKETCH_REFERENCE')
+            resolved.append(dict(copy.deepcopy(item),semantic_support='UNKNOWN'))
         elif source=='model_inference':
             if not isinstance(item.get('reason'),str) or not item['reason'].strip():raise ValueError('UNEXPLAINED_INFERENCE')
+            resolved.append(dict(copy.deepcopy(item),semantic_support='UNKNOWN'))
         else:raise ValueError('INVALID_EVIDENCE_SOURCE')
+    return resolved
 
 
 def sizing(spec):
@@ -64,41 +87,57 @@ def sizing(spec):
 
 
 def observation_changes(state, vision, intent):
-    """Compare same-ID semantic fields; quotes establish provenance, not truth."""
+    """Compute field diff once; model supplies only per-field quote and reason."""
     planned={e['id']:e for e in state.get('elements',[])}
-    declarations=state.get('observation_change_evidence',[])
-    ledger=[];used=set()
+    ledger=[]
     for original in vision.get('elements',[]):
         target=planned.get(original['id'],{})
+        sources=target.get('change_sources',{})
+        if not isinstance(sources,dict):raise ValueError('INVALID_CHANGE_SOURCES')
+        used=set()
         for field in ('type','text','action','actions','rpa_action'):
             if field not in original and field not in target:continue
             before={'present':field in original,'value':copy.deepcopy(original.get(field))}
             after={'present':field in target,'value':copy.deepcopy(target.get(field))}
             if before==after:continue
-            matches=[(i,d) for i,d in enumerate(declarations) if d.get('id')==original['id'] and d.get('field')==field]
-            row={'id':original['id'],'field':field,'before':before,'after':after}
-            if len(matches)!=1:
-                row.update(status='UNSOURCED_CHANGE',reason='exactly one declaration required')
-            else:
-                i,d=matches[0];used.add(i);refs=d.get('evidence',[])
-                try:
-                    if d.get('before')!=before or d.get('after')!=after:raise ValueError('DECLARATION_VALUE_MISMATCH')
-                    if not d.get('reason') or not refs or any(x.get('source')!='asr' for x in refs):raise ValueError('ASR_REQUIRED_FOR_SEMANTIC_CHANGE')
-                    evidence(refs,intent,{e['id'] for e in vision['elements']})
-                    if field in original and (field not in target or target[field] in (None,'',[],{})) and original[field] not in (None,'',[],{}):raise ValueError('OBSERVED_CONTENT_LOST')
-                    row.update(status='ASR_SOURCED_PROPOSAL_NOT_SEMANTICALLY_CONFIRMED',evidence=copy.deepcopy(refs),reason=d['reason'])
-                except ValueError as exc:row.update(status='UNSOURCED_CHANGE',reason=str(exc))
+            row={'id':original['id'],'field':field,'before':before,'after':after,'semantic_support':'UNKNOWN'}
+            if field=='actions' and not before['present'] and after['value']==[]:
+                row.update(status='NO_ADDITIONAL_ACTION_PLAN',reason='empty plan only; original missing observation preserved')
+                ledger.append(row);continue
+            try:
+                if before['value'] not in (None,'',[],{}) and (not after['present'] or after['value'] in (None,'',[],{})):
+                    raise ValueError('OBSERVED_CONTENT_LOST')
+                declaration=sources.get(field);used.add(field)
+                if not isinstance(declaration,dict) or set(declaration)!={'quote','reason'}:
+                    raise ValueError('FIELD_QUOTE_AND_REASON_REQUIRED')
+                if not isinstance(declaration['reason'],str) or not declaration['reason'].strip():raise ValueError('CHANGE_REASON_REQUIRED')
+                location=locate_quote(declaration['quote'],intent);row['source_location']=location
+                if location['status']!='UNIQUE_EXACT_QUOTE':raise ValueError(location['status'])
+                row.update(status='SOURCED_PLANNING_PROPOSAL',reason=declaration['reason'])
+            except ValueError as exc:row.update(status='REJECTED_CHANGE',reason=str(exc))
             ledger.append(row)
-    for i,d in enumerate(declarations):
-        if i not in used:ledger.append({'declaration':copy.deepcopy(d),'status':'UNSOURCED_CHANGE','reason':'unused or duplicate declaration'})
+        for field in sorted(set(sources)-used):
+            ledger.append({'id':original['id'],'field':field,'status':'REJECTED_CHANGE',
+                           'semantic_support':'UNKNOWN','reason':'unused change source for unchanged/normalization/unsupported field'})
     trace_event('region_tree.observation_changes',ledger=ledger,original_vision=vision)
-    if any(x['status']=='UNSOURCED_CHANGE' for x in ledger):raise ValueError('UNSOURCED_OBSERVATION_CHANGE')
+    if any(x['status']=='REJECTED_CHANGE' for x in ledger):raise ValueError('UNSOURCED_OBSERVATION_CHANGE')
     return ledger
 
 
-def compile_region_tree(state, vision, intent):
+def _compile_region_tree(state, vision, intent):
     trace_event('region_tree.before',state=state,vision=vision)
+    if 'observation_change_evidence' in state:raise ValueError('LEGACY_REPEATED_CHANGE_LEDGER')
     out=copy.deepcopy(state);elements=out.get('elements',[])
+    contract=out.get('region_contract',{})
+    if not isinstance(contract,dict) or set(contract)!={'version','root_id','regions'} or contract.get('version')!='region-tree-v2':
+        raise ValueError('SINGLE_CANONICAL_REGION_PLAN_REQUIRED')
+    regions=contract['regions']
+    if not isinstance(elements,list) or not isinstance(regions,list) or not all(isinstance(x,dict) for x in elements+regions):
+        raise ValueError('INVALID_PLAN_NODES')
+    for node in elements+regions:
+        if any(key in node for key in ('objects','elements','regions','children','children_ids','members','member_ids','parent_id')):
+            raise ValueError('NESTED_OR_DUPLICATE_PARENT_MAPPING')
+        if 'parent' not in node:raise ValueError('EXPLICIT_PARENT_REQUIRED')
     vids=[e.get('id') for e in vision.get('elements',[])]
     ids=[e.get('id') for e in elements]
     if any(not isinstance(x,str) or not x for x in vids+ids) or len(set(vids))!=len(vids) or len(set(ids))!=len(ids):raise ValueError('DUPLICATE_OR_MISSING_OBJECT_ID')
@@ -107,32 +146,27 @@ def compile_region_tree(state, vision, intent):
         if item['id'] not in vids:
             if item.get('origin')!='spoken' or not item['id'].startswith('u_'):raise ValueError('UNSOURCED_BUSINESS_OBJECT')
             refs=item.get('source_evidence',[])
-            if not refs or any(x.get('source')!='asr' for x in refs):raise ValueError('NEW_OBJECT_REQUIRES_ASR')
+            if not isinstance(refs,list) or not refs or any(not isinstance(x,dict) or x.get('source')!='asr' for x in refs):
+                raise ValueError('NEW_OBJECT_REQUIRES_ASR')
             evidence(refs,intent,set(vids))
+            if item.get('change_sources'):raise ValueError('NEW_OBJECT_HAS_NO_OBSERVATION_TO_CHANGE')
     changes=observation_changes(out,vision,intent)
     out['observation_provenance']={'original_vision':copy.deepcopy(vision),'changes':changes,'semantic_confirmation':'NOT_CONFIRMED_BY_REFERENCE_EXISTENCE'}
-    contract=out.get('region_contract',{})
-    if contract.get('version')!='region-tree-v1':raise ValueError('MISSING_REGION_CONTRACT')
-    regions=contract.get('regions',[]);rids=[r.get('id') for r in regions];root=contract.get('root_id')
-    if not root or root not in rids or len(set(rids))!=len(rids) or set(rids)&set(ids):raise ValueError('INVALID_REGION_IDENTITIES')
+    rids=[r.get('id') for r in regions];root=contract.get('root_id')
     if any(not isinstance(r,str) or not r.startswith('region_') for r in rids):raise ValueError('REGION_ID_NAMESPACE')
-    assignments=contract.get('objects',[])
-    if sorted(x.get('id','') for x in assignments)!=sorted(ids):raise ValueError('OBJECT_PARENT_COVERAGE')
-    assigned={item['id']:item for item in assignments}
-    for item in elements:
-        if item.get('parent_id') is not None and item['parent_id']!=assigned[item['id']]['parent']:
-            raise ValueError('CONFLICTING_OBJECT_PARENT')
-    nodes={r['id']:r for r in regions};nodes.update({a['id']:a for a in assignments})
+    if not root or root not in rids or len(set(rids))!=len(rids) or set(rids)&set(ids):raise ValueError('INVALID_REGION_IDENTITIES')
+    nodes={r['id']:r for r in regions};nodes.update({item['id']:item for item in elements})
     children=defaultdict(list);styles={};parents={};reviews=[]
     for identity,node in nodes.items():
         is_root=identity==root;parent=node.get('parent')
         if (is_root and parent is not None) or (not is_root and parent not in rids):raise ValueError('INVALID_PARENT')
         parents[identity]=parent
-        evidence(node.get('evidence'),intent,set(vids),root=is_root)
-        status=node.get('relation_status','proposed')
+        resolved=evidence(node.get('evidence'),intent,set(vids),root=is_root)
+        status=node.get('relation_status')
+        if is_root:status='proposed'
         if status not in {'proposed','unknown'}:raise ValueError('INVALID_RELATION_STATUS')
         if not is_root and status=='unknown' and parent!=root:raise ValueError('UNKNOWN_MEMBERSHIP_MUST_STAY_AT_ROOT')
-        reviews.append({'id':identity,'evidence':copy.deepcopy(node['evidence']),
+        reviews.append({'id':identity,'evidence':resolved,'semantic_support':'UNKNOWN',
                         'status':'system_organization' if is_root else 'unknown' if status=='unknown' else 'model_proposed_not_human_confirmed'})
         css={'boxSizing':'border-box','minWidth':0,'minHeight':0,'margin':0,'position':'relative'}
         if not is_root:
@@ -169,3 +203,11 @@ def compile_region_tree(state, vision, intent):
     if out['elements']!=state['elements']:raise AssertionError('BUSINESS_OBJECT_MUTATED')
     trace_event('region_tree.after',state=out)
     return out
+
+
+def compile_region_tree(state, vision, intent):
+    try:return _compile_region_tree(state,vision,intent)
+    except (ValueError,TypeError,KeyError) as exc:
+        trace_event('region_tree.rejected',error=str(exc),exception_type=type(exc).__name__,
+                    outcome='NO_CODER_NO_AUTOMATIC_REPAIR',semantic_support='UNKNOWN')
+        raise

@@ -11,10 +11,12 @@ def sample():
     state={'page_meta':{'viewport':{'width':1440,'height':900}},'elements':[
         {'id':'left','type':'text','text':'same','rpa_action':'display_a','spatial_info':{'bbox':[0,0,10,10]}},
         {'id':'right','type':'input','text':'same','rpa_action':'type_text','spatial_info':{'bbox':[5,5,15,15]}}],
-        'region_contract':{'version':'region-tree-v1','root_id':'region_page','regions':[
+        'region_contract':{'version':'region-tree-v2','root_id':'region_page','regions':[
             {'id':'region_page','kind':'semantic_region','parent':None,'evidence':[{'source':'system_root'}],
              'layout':{'direction':'row','gap_px':8,'padding_px':0,'overflow':'visible'}}],
-            'objects':[{'id':identity,'parent':'region_page','order':i,'evidence':copy.deepcopy(ev),'sizing':copy.deepcopy(size)} for i,identity in enumerate(['left','right'])]}}
+            }}
+    for i,item in enumerate(state['elements']):
+        item.update(parent='region_page',order=i,evidence=copy.deepcopy(ev),sizing=copy.deepcopy(size),relation_status='proposed')
     vision={'canvas':{'width':406,'height':720},'elements':[{'id':e['id'],'type':e['type'],'text':e['text'],'rpa_action':e['rpa_action'],'bbox':{'x_min':0,'y_min':0,'x_max':1,'y_max':1}} for e in state['elements']]}
     return state,vision
 
@@ -31,11 +33,11 @@ def test_preserve_objects_same_text_overlapping_boxes_and_coordinate_evidence():
 @pytest.mark.parametrize('mutate',[
     lambda s:s['elements'].pop(),
     lambda s:s['elements'].append(copy.deepcopy(s['elements'][0])),
-    lambda s:s['region_contract']['objects'].append(copy.deepcopy(s['region_contract']['objects'][0])),
-    lambda s:s['region_contract']['objects'][0].update(parent='missing'),
-    lambda s:s['region_contract']['objects'][1].update(order=0),
-    lambda s:s['region_contract']['objects'][0].update(evidence=[]),
-    lambda s:s['region_contract']['objects'][0]['sizing'].update(grow=float('nan')),
+    lambda s:s['region_contract'].update(objects=[]),
+    lambda s:s['elements'][0].update(parent='missing'),
+    lambda s:s['elements'][1].update(order=0),
+    lambda s:s['elements'][0].update(evidence=[]),
+    lambda s:s['elements'][0]['sizing'].update(grow=float('nan')),
     lambda s:s['elements'][0].update(parent_id='wrong'),
     lambda s:s['region_contract']['regions'][0]['layout'].update(direction='equal-five'),
 ])
@@ -45,25 +47,25 @@ def test_invalid_contract_fails_without_fallback(mutate):
 
 
 def test_asr_reference_existence_not_semantic_confirmation():
-    s,v=sample();s['region_contract']['objects'][0]['evidence']=[{'source':'asr','quote':'left','start':0,'end':4}]
+    s,v=sample();s['elements'][0]['evidence']=[{'source':'asr','quote':'left'}]
     out=compile_region_tree(s,v,'left area')
     assert out['region_layout']['review'][1]['status']=='model_proposed_not_human_confirmed'
     with pytest.raises(ValueError):compile_region_tree(s,v,'different')
 
 
 def test_cycles_and_unreachable_regions_rejected():
-    s,v=sample();node=copy.deepcopy(s['region_contract']['regions'][0]);node.update(id='region_cycle',parent='region_cycle',order=2,evidence=[{'source':'model_inference','reason':'test'}],sizing={'basis_px':'auto','grow':1,'shrink':1})
+    s,v=sample();node=copy.deepcopy(s['region_contract']['regions'][0]);node.update(id='region_cycle',parent='region_cycle',order=2,relation_status='proposed',evidence=[{'source':'model_inference','reason':'test'}],sizing={'basis_px':'auto','grow':1,'shrink':1})
     s['region_contract']['regions'].append(node)
     with pytest.raises(ValueError,match='REGION_CYCLE'):compile_region_tree(s,v,'')
 
 
 def test_missing_relation_does_not_get_inferred_from_bbox():
-    s,v=sample();s['region_contract']['objects']=[]
-    with pytest.raises(ValueError,match='OBJECT_PARENT_COVERAGE'):compile_region_tree(s,v,'')
+    s,v=sample();del s['elements'][0]['parent']
+    with pytest.raises(ValueError,match='EXPLICIT_PARENT_REQUIRED'):compile_region_tree(s,v,'')
 
 
 def test_unknown_root_membership_preserved_not_confirmed():
-    s,v=sample();s['region_contract']['objects'][0]['relation_status']='unknown'
+    s,v=sample();s['elements'][0]['relation_status']='unknown'
     out=compile_region_tree(s,v,'')
     assert out['region_layout']['review'][1]['status']=='unknown'
 

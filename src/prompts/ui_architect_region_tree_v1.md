@@ -1,15 +1,37 @@
-Return one JSON UI-State with page_meta.viewport, elements, and region_contract. No extra model call.
-Preserve every supplied visual object ID exactly once; do not merge same labels. Keep object type, text, actions, source references, requirements and spatial_info evidence; legitimate semantic refinement must not discard independent objects. New spoken-only business objects require u_ IDs, origin=spoken and exact ASR source_evidence. Do not add guessed business features.
-page_meta.viewport is the requested TARGET canvas, not the input photo size. Original photo/normalized boxes are observation evidence. If offering target spatial_info boxes, mark them soft proposals; do not claim they are observed photo coordinates.
+Return one JSON planning proposal. No extra model call. Supplied vision is an immutable observation: preserve every original ID exactly once, and do not merge independent objects with equal text. Code saves the original separately and computes field differences and exact quote locations. Supply only the plan and reasons/quotes, never a second observation or before/after ledger.
 
-region_contract schema:
-{"version":"region-tree-v1","root_id":"region_page","regions":[{"id":"region_page","kind":"semantic_region","parent":null,"evidence":[{"source":"system_root"}],"layout":{"direction":"column","gap_px":0,"padding_px":0,"overflow":"visible"}}],"objects":[]}
-Add only necessary semantic organizational regions, not fake business objects. Every non-root region and every object assignment has id,parent (region ID), order (unique nonnegative sibling integer), evidence, sizing. Each business element appears exactly once in objects, retaining its original ID. Region nodes never enter elements. Every region reaches one root. No cycles. Parent membership is authoritative; do not duplicate a separate member list. Siblings ordered by order imply row left-to-right or column top-to-bottom according to their parent's layout.
-sizing={"basis_px":"auto" or nonnegative number,"grow":nonnegative number,"shrink":nonnegative number,"cross":"stretch" or "intrinsic"}. Region layout direction=row/column; overflow=visible/auto/hidden; gap_px/padding_px nonnegative. Use ratios/flex and content sizes rather than equal region partitions. Never use each sketch bbox as a hard target pixel position. Explicit user containment/edge/order/size requirements outrank center-point estimates; retain unresolved constraints rather than invent an answer. Hide/scroll/fix policies not spoken by the user are ENGINEERING proposals, not original requirements. Avoid clipping critical controls.
-evidence is a nonempty array of independently labeled sources:
-- {"source":"asr","quote":"exact substring of User Intent","start":inclusive Unicode character index,"end":exclusive index}; reference raw ASR as provided, preserve transcription uncertainty.
-- {"source":"sketch","visual_ids":["source ID"],"reason":"observed relationship and uncertainty"}; bbox overlap alone does not confirm containment.
-- {"source":"model_inference","reason":"why proposed; what remains uncertain"}.
-Quoted text existence and IDs do not make relation meaning human-confirmed. Keep model inferences separate. If membership is unknown, retain the object directly under root with relation_status=unknown and a model_inference reason describing the missing evidence. This is only mechanical root reachability, not an asserted semantic relationship; do not invent a subgroup for it. Other relationships have relation_status=proposed, never self-confirmed. No case-specific templates, chat/product rules, new backend or added Agent.
+Single canonical region_contract schema (version region-tree-v2):
+{
+  "page_meta":{"viewport":{"width":1440,"height":900}},
+  "elements":[
+    {"id":"original_visual_id","type":"original type","text":"original text",
+     "parent":"region_page","order":0,"relation_status":"unknown",
+     "sizing":{"basis_px":"auto","grow":0,"shrink":1,"cross":"intrinsic"},
+     "evidence":[{"source":"model_inference","reason":"membership unresolved; root is mechanical storage only"}]}
+  ],
+  "region_contract":{
+    "version":"region-tree-v2","root_id":"region_page",
+    "regions":[
+      {"id":"region_page","kind":"semantic_region","parent":null,
+       "evidence":[{"source":"system_root"}],
+       "layout":{"direction":"column","gap_px":0,"padding_px":0,"overflow":"visible"}}
+    ]
+  }
+}
+This illustrates schema, not a layout template, object count or new requirement. Choose the requested TARGET viewport, not photo dimensions. Business objects occur only in elements; organizational regions occur only in flat regions. Never emit region_contract.objects, nested objects/children/member lists, parent_id, or another mapping. Put parent/order/sizing/evidence on each element itself. Keep original business properties, text, source references and spatial_info unless an explicitly sourced refinement is necessary. Organizational regions add no visible label, action or business object.
 
-For any same-ID difference in type/text/action/actions/rpa_action compared with supplied vision (including field additions), output observation_change_evidence entries: {"id":"original ID","field":"type","before":{"present":true,"value":"original value"},"after":{"present":true,"value":"planned value"},"reason":"specific ASR-supported correction","evidence":[{"source":"asr","quote":"exact substring","start":0,"end":1}]}. Unchanged fields need no declaration. ASR-supported type/behavior refinement is allowed with exact source evidence; unsupported overwrites and deletion of observed nonempty content are rejected. Preserve the original observation as evidence; a valid quote does not prove its interpretation. Do not invent an ASR quote to justify a change.
+Every non-root node explicitly includes parent (existing region ID), unique nonnegative sibling order, sizing, relation_status (proposed or unknown), and evidence. Add only necessary semantic regions, every region reaching the sole root without cycles. Each region has kind=semantic_region and layout. For unknown membership use parent=root, relation_status=unknown and a model_inference reason; mechanical reachability does not confirm page membership. Code will not guess missing parents, flatten nested regions or repair invalid trees.
+
+Sizing: basis_px="auto" or nonnegative target pixels, grow/shrink nonnegative, cross=stretch or intrinsic. Layout: direction=row/column, overflow=visible/auto/hidden, gap_px/padding_px nonnegative. order is left-to-right in a row, top-to-bottom in a column. Use content/ratios/flex, not equal partitions or absolute source-photo boxes. Explicit containment, edge, order and size requirements outrank inferred centers. Original boxes remain soft evidence. Scroll/clipping/fixing not explicitly required are engineering proposals; avoid hiding critical controls.
+
+Evidence is a nonempty list, using only:
+- {"source":"asr","quote":"exact unique substring of provided User Intent"}
+- {"source":"sketch","visual_ids":["original ID"],"reason":"observed relationship and uncertainty"}
+- {"source":"model_inference","reason":"proposed interpretation and uncertainty"}
+Do not supply start/end or offsets: code computes positions only for unique exact quotes. Missing/repeated quotes are not usable source positions. Report uncertainty rather than inventing text or certainty. Quote existence proves location, not semantic support; User Intent is the supplied combined source, not an independently isolated ASR channel. Vision ID or box overlap does not prove containment. Relations remain proposals, never human-confirmed.
+
+Only when changing type, text, action, actions or rpa_action for an existing ID, add on that SAME element:
+"change_sources":{"changed_field_name":{"quote":"exact unique original substring","reason":"why this supports this refinement; what remains uncertain"}}
+One quote/reason per substantive changed field; no unchanged-field declarations, before/after values, repeated ID/field table or observation_change_evidence. Code computes those facts from untouched vision. Changes without unique source are rejected. A quoted plan is still semantically unconfirmed. Preserve all nonempty observed text/actions: deletion/clearing is rejected even with a quote. Adding nonempty behavior requires its own source; do not invent business features. Missing actions -> [] means no additional action plan, not no interaction required, and needs no change_sources entry. Do not clear existing nonempty action/actions/rpa_action.
+
+New spoken-only objects require unique u_ IDs, origin=spoken, source_evidence=[{"source":"asr","quote":"exact unique substring"}], plus explicit parent/order/sizing/evidence/relation_status. They cannot replace an existing object. Do not add backend capabilities, case-specific chat/product rules or another Agent. Preserve uncertainty; do not invent feedback success.

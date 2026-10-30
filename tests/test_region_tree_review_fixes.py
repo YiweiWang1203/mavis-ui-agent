@@ -9,10 +9,7 @@ from src.utils.region_tree_contract import compile_region_tree
 
 
 def declaration(s, v, field='type'):
-    a, b = v['elements'][0], s['elements'][0]
-    return {'id':'left','field':field,'before':{'present':field in a,'value':a.get(field)},
-            'after':{'present':field in b,'value':b.get(field)},'reason':'synthetic ASR correction',
-            'evidence':[{'source':'asr','quote':'editable','start':0,'end':8}]}
+    return {'quote':'editable','reason':'synthetic sourced planning proposal, not semantic confirmation'}
 
 
 @pytest.mark.parametrize('field,value',[('type','input'),('text','other'),('rpa_action','send'),('actions',['click'])])
@@ -22,21 +19,22 @@ def test_unsourced_changes(field,value):
 
 
 def test_sourced_refinement_retains_both_observation_and_plan():
-    s,v=sample();s['elements'][0]['type']='input';s['observation_change_evidence']=[declaration(s,v)]
+    s,v=sample();s['elements'][0]['type']='input';s['elements'][0]['change_sources']={'type':declaration(s,v)}
     original=copy.deepcopy(v);out=compile_region_tree(s,v,'editable')
     assert out['elements']==s['elements'] and v==original
     assert out['observation_provenance']['original_vision']==original
-    assert out['observation_provenance']['changes'][0]['status']=='ASR_SOURCED_PROPOSAL_NOT_SEMANTICALLY_CONFIRMED'
+    assert out['observation_provenance']['changes'][0]['status']=='SOURCED_PLANNING_PROPOSAL'
+    assert out['observation_provenance']['changes'][0]['semantic_support']=='UNKNOWN'
 
 
-@pytest.mark.parametrize('kind',['wrong_quote','deletion','duplicate','false_before'])
+@pytest.mark.parametrize('kind',['wrong_quote','deletion','unused_field','model_before'])
 def test_bad_declarations(kind):
-    s,v=sample();s['elements'][0]['type']='input';d=declaration(s,v);s['observation_change_evidence']=[d]
-    if kind=='wrong_quote':d['evidence'][0]['quote']='missing'
+    s,v=sample();s['elements'][0]['type']='input';d=declaration(s,v);s['elements'][0]['change_sources']={'type':d}
+    if kind=='wrong_quote':d['quote']='missing'
     if kind=='deletion':
-        del s['elements'][0]['type'];s['observation_change_evidence']=[declaration(s,v)]
-    if kind=='duplicate':s['observation_change_evidence'].append(copy.deepcopy(d))
-    if kind=='false_before':d['before']['value']='wrong'
+        del s['elements'][0]['type']
+    if kind=='unused_field':s['elements'][0]['change_sources']['text']=copy.deepcopy(d)
+    if kind=='model_before':d['before']='wrong'
     with pytest.raises(ValueError,match='UNSOURCED_OBSERVATION_CHANGE'):compile_region_tree(s,v,'editable')
 
 
