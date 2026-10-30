@@ -2,7 +2,7 @@ import copy
 import math
 import os
 from typing import Any
-from src.utils.pipeline_trace import traced_stage
+from src.utils.pipeline_trace import traced_stage, trace_event
 
 
 INTERACTIVE_TYPES = {"button", "input", "select", "search_input", "switch", "tab"}
@@ -261,13 +261,105 @@ def _solve_product_detail_layout(
     return result
 
 
+class TargetGeometryRejected(ValueError):
+    """The opt-in target geometry is not eligible for a Coder request."""
+
+
+def _preserve_target_layout(ui_state: dict[str, Any], coordinate_space: str | None) -> dict[str, Any]:
+    errors = []
+    if coordinate_space != "target_px_xyxy":
+        errors.append({"code": "unverified_coordinate_space", "coordinate_space": coordinate_space})
+    if not isinstance(ui_state, dict):
+        raise TargetGeometryRejected({"status": "rejected", "errors": [{"code": "state_not_object"}]})
+    page_meta = ui_state.get("page_meta")
+    viewport = page_meta.get("viewport") if isinstance(page_meta, dict) else None
+    valid_number = lambda value: isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    valid_viewport = isinstance(viewport, dict) and all(
+        valid_number(viewport.get(key)) and viewport[key] > 0 for key in ("width", "height")
+    )
+    if not valid_viewport:
+        errors.append({"code": "missing_or_invalid_target_viewport", "viewport": viewport})
+    elements = ui_state.get("elements")
+    if not isinstance(elements, list) or not elements:
+        errors.append({"code": "missing_or_empty_elements"})
+        elements = []
+    seen = set()
+    for index, element in enumerate(elements):
+        if not isinstance(element, dict):
+            errors.append({"code": "element_not_object", "index": index})
+            continue
+        element_id = element.get("id")
+        if not isinstance(element_id, str) or not element_id.strip() or element_id in seen:
+            errors.append({"code": "missing_or_duplicate_id", "index": index, "id": element_id})
+        if isinstance(element_id, str):
+            seen.add(element_id)
+        spatial = element.get("spatial_info")
+        box = spatial.get("bbox") if isinstance(spatial, dict) else None
+        if not isinstance(box, list) or len(box) != 4 or not all(valid_number(v) for v in box):
+            errors.append({"code": "invalid_bbox_numbers", "index": index, "id": element_id})
+            continue
+        x1, y1, x2, y2 = box
+        if x2 <= x1 or y2 <= y1:
+            errors.append({"code": "invalid_bbox_order", "index": index, "id": element_id, "bbox": box})
+            continue
+        if valid_viewport and (x1 < 0 or y1 < 0 or x2 > viewport["width"] or y2 > viewport["height"]):
+            errors.append({"code": "bbox_outside_target", "index": index, "id": element_id, "bbox": box})
+        if str(element.get("type") or "").lower() not in {"line", "divider"} and (x2-x1 <= 1 or y2-y1 <= 1):
+            errors.append({"code": "degenerate_source_control", "index": index, "id": element_id, "bbox": box})
+    if errors:
+        diagnostic = {"status": "rejected", "mode": "preserve_target", "errors": errors}
+        trace_event("architect.preserve_target_admission", diagnostic=diagnostic)
+        raise TargetGeometryRejected(diagnostic)
+    result = copy.deepcopy(ui_state)
+    intersections = []
+    for index, element in enumerate(result["elements"]):
+        box = element["spatial_info"]["bbox"]
+        kind = str(element.get("type") or "unknown")
+        font = 16 if kind in {"button", "header"} else 14
+        text = str(element.get("text") or "")
+        for _ in range(4):
+            lines = _line_count(text, box[2]-box[0], font)
+            hinted = _font_hint(kind, box[3]-box[1], lines)
+            if hinted == font:
+                break
+            font = hinted
+        lines = _line_count(text, box[2]-box[0], font)
+        element["typography"] = {"line_count": lines,
+            "font_size_px": font,
+            "wrap": lines > 1, "fit": "shrink_or_wrap"}
+        element["render_geometry"] = {
+            "coordinate_space": "target_px_xyxy",
+            "center_ratio": [(box[0]+box[2])/(2*viewport["width"]), (box[1]+box[3])/(2*viewport["height"])],
+            "size_ratio": [(box[2]-box[0])/viewport["width"], (box[3]-box[1])/viewport["height"]],
+            "aspect_ratio": (box[2]-box[0])/(box[3]-box[1]),
+        }
+        for peer in result["elements"][index+1:]:
+            other = peer["spatial_info"]["bbox"]
+            area = max(0, min(box[2], other[2])-max(box[0], other[0])) * max(0, min(box[3], other[3])-max(box[1], other[1]))
+            if area:
+                intersections.append({"ids": [element["id"], peer["id"]], "area": area,
+                                      "classification": "observed_intersection_relation_unresolved"})
+    result["page_meta"]["layout_solver"] = {"version": "preserve-target-v1", "status": "applied",
+        "coordinate_space": coordinate_space, "element_count": len(elements)}
+    # Geometry observations stay outside the Coder payload. They do not infer
+    # a parent tree or claim every intersecting pair is an illegal collision.
+    trace_event("architect.preserve_target_admission", diagnostic={"status": "applied",
+                "bbox_changes": 0, "intersections": intersections})
+    return result
+
+
 @traced_stage('architect.layout')
-def solve_ui_layout(ui_state: dict[str, Any]) -> dict[str, Any]:
+def solve_ui_layout(ui_state: dict[str, Any], layout_mode: str = "legacy",
+                    coordinate_space: str | None = None) -> dict[str, Any]:
     """Convert tight visual evidence boxes into a bounded relational render layout.
 
     Every detected element is retained. The original box is stored as evidence_bbox;
     only the render bbox is expanded, aligned, and collision-repaired.
     """
+    if layout_mode == "preserve_target":
+        return _preserve_target_layout(ui_state, coordinate_space)
+    if layout_mode != "legacy":
+        raise ValueError("Unsupported layout mode")
     if os.getenv("LAYOUT_SOLVER_ENABLED", "1").strip().lower() in {"0", "false", "no", "off"}:
         return ui_state
     if not isinstance(ui_state, dict):

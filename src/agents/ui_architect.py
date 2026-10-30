@@ -5,7 +5,7 @@ import os
 from typing import Any
 
 from src.priors import apply_ui_priors
-from src.utils.layout_solver import solve_ui_layout
+from src.utils.layout_solver import solve_ui_layout, TargetGeometryRejected
 from src.utils.pipeline_trace import traced_stage, trace_event
 
 try:
@@ -356,6 +356,10 @@ Return the final fused UI-State JSON.
             ui_state = refine_relation_state(ui_state, user_intent, planner_model, _get_openai_client(), mode=specialist_mode)
         return finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, preferred_locale)
 
+    except TargetGeometryRejected:
+        # Opt-in layout rejection is a terminal admission failure, never a
+        # successful error-shaped UI-State eligible for Coder.
+        raise
     except json.JSONDecodeError as exc:
         print(f"UI Architect JSON parse failed: {exc}")
         return {"error": "JSON_PARSE_ERROR"}
@@ -410,7 +414,11 @@ def finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, pr
         preferred_locale or infer_locale_from_text(user_intent),
     )
     priorized = apply_ui_priors(repaired, user_intent=user_intent, vision_elements=vision_elements)
-    return solve_ui_layout(priorized)
+    # This call follows compilation into the chosen target viewport; raw photo
+    # or normalized vision coordinates must not enter the opt-in preservation.
+    return solve_ui_layout(priorized,
+        layout_mode=os.getenv("UI_LAYOUT_MODE", "legacy"),
+        coordinate_space="target_px_xyxy")
 
 
 if __name__ == "__main__":
