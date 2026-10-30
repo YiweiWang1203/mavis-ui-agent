@@ -1,5 +1,5 @@
 """Shared paired runner. CLI is offline only; injected transport is caller-owned.
-No model SDK/network transport is constructed here. No HTML is written.
+No model SDK/network transport is constructed here. HTML export is opt-in only.
 """
 import argparse
 import copy
@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from html.parser import HTMLParser
 from types import SimpleNamespace
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -20,7 +21,42 @@ def write(path,value):
     with path.open('x',encoding='utf-8') as f:json.dump(value,f,ensure_ascii=False,indent=2)
 
 
-def run_pair(vision,intent,model,out,transport,*,transport_identity):
+def export_coder_html(folder, rendered_code):
+    """Export production fence extraction verbatim; never repair invalid output."""
+    response_path=folder/'coder_response.json'
+    response=json.loads(response_path.read_text(encoding='utf-8'))
+    raw=response.get('content')
+    if response.get('finish_reason')!='stop' or not isinstance(raw,str) or not raw.strip():
+        raise ValueError('HTML_EXPORT_REQUIRES_NONEMPTY_STOP')
+    code=coder.strip_markdown_code_fence(raw)
+    if not code or code!=rendered_code:
+        raise ValueError('HTML_EXTRACTION_MISMATCH_OR_EMPTY')
+    class DocumentCheck(HTMLParser):
+        def __init__(self):super().__init__(convert_charrefs=False);self.tags=[]
+        def handle_starttag(self,tag,attrs):
+            if tag in {'html','body'}:self.tags.append(('start',tag))
+        def handle_endtag(self,tag):
+            if tag in {'html','body'}:self.tags.append(('end',tag))
+    parser=DocumentCheck()
+    try:parser.feed(code);parser.close()
+    except Exception as exc:raise ValueError('HTML_PARSE_FAILED') from exc
+    # A deliberately minimal completeness gate, not HTML validity/business QA.
+    if parser.tags!=[('start','html'),('start','body'),('end','body'),('end','html')] or not code.rstrip().lower().endswith('</html>'):
+        raise ValueError('INCOMPLETE_HTML_DOCUMENT')
+    data=code.encode('utf-8');path=folder/'original_coder.html'
+    with path.open('xb') as stream:stream.write(data)
+    record={'raw_response_file':str(response_path),'raw_response_sha256':hashlib.sha256(response_path.read_bytes()).hexdigest(),
+            'raw_content_utf8_sha256':hashlib.sha256(raw.encode('utf-8')).hexdigest(),
+            'html_file':str(path),'html_sha256':hashlib.sha256(data).hexdigest(),
+            'extraction':'production coder.strip_markdown_code_fence only; exact rendered_code equality',
+            'completeness_gate':'one html/body start/end in document order and closing html suffix; not full HTML validity',
+            'mutations':'NONE beyond existing production fence/outer-whitespace extraction',
+            'browser_acceptance':'NOT_EXECUTED'}
+    write(folder/'html_export.json',record)
+    return record
+
+
+def run_pair(vision,intent,model,out,transport,*,transport_identity,export_original_html=False):
     """transport(arm,node,request) returns SDK-shaped response. Never retries.
     Failure stops that arm; the other frozen arm is still accounted separately.
     Caller must authorize any external transport separately. CLI uses synthetic only.
@@ -69,6 +105,7 @@ def run_pair(vision,intent,model,out,transport,*,transport_identity):
                 if not isinstance(state,dict) or state.get('error') or not state.get('elements'):raise ValueError('ARCHITECT_CONTRACT_FAILED')
                 rendered=coder.generate_frontend_code(state)
                 if not isinstance(rendered,dict) or not rendered.get('code'):raise ValueError('CODER_CONTRACT_FAILED')
+                if export_original_html:export_coder_html(folder,rendered['code'])
                 result={'arm':arm,'status':'PIPELINE_RETURNED_NOT_ACCEPTED','requests_dispatched':len(requests[arm])}
             except Exception as exc:result={'arm':arm,'status':'FAILED_NO_RETRY','exception_type':type(exc).__name__,'reason':str(exc),'requests_dispatched':len(requests[arm])}
         result['terminal_events']=terminal;write(folder/'terminal.json',result);results.append(result)
@@ -80,7 +117,7 @@ def run_pair(vision,intent,model,out,transport,*,transport_identity):
             'shared_policy_equal': bool(a and b) and all(a.get(k)==b.get(k) for k in ('model','temperature','max_tokens','timeout')),
             'messages':{role:{'equal':bool(a and b) and a['messages'][i]==b['messages'][i]} for i,role in enumerate(('system','user'))}}
     write(out/'request_diff.json',differences)
-    summary={'transport':transport_identity,'input_sha256':digest,'model':model,'max_tokens':8192,'timeout_seconds':600,'max_retries':0,'max_requests':4,'results':results,'browser':'NOT_EXECUTED','effect':'NOT_EVALUATED','new_html_files':0}
+    summary={'transport':transport_identity,'input_sha256':digest,'model':model,'max_tokens':8192,'timeout_seconds':600,'max_retries':0,'max_requests':4,'results':results,'browser':'NOT_EXECUTED','effect':'NOT_EVALUATED','new_html_files':len(list(out.glob('*/original_coder.html'))),'html_export_enabled':export_original_html}
     write(out/'summary.json',summary);return summary
 
 
