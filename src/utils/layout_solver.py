@@ -216,12 +216,29 @@ def _solve_product_detail_layout(
 
         label_width = min(112, max(88, int((width - margin * 2) * 0.32)))
         value_left = margin + label_width + 8
+        # Keep the historical two-column path unchanged. For multiple value
+        # columns, reserve one slot per value, including the final column.
+        column_width = (width - margin - value_left) // (len(row) - 1)
+        if len(row) > 2 and column_width - 4 < 14:
+            # 14px is this row's existing font size, not a usability guarantee.
+            # Raising prevents a failed layout from silently reaching Coder.
+            raise ValueError({
+                "code": "product_detail_columns_insufficient_capacity",
+                "row_index": row_index,
+                "object_ids": row_ids,
+                "available_width": width - margin - value_left,
+                "value_column_count": len(row) - 1,
+                "slot_width": column_width,
+                "minimum_content_width": 14,
+                "gap": 4,
+            })
         for column, item in enumerate(row):
             if column == 0:
                 bbox = [margin, row_top, margin + label_width, row_bottom]
                 font_size = 14
             elif column == len(row) - 1:
-                bbox = [value_left, row_top, width - margin, row_bottom]
+                left = value_left + (column - 1) * column_width
+                bbox = [left, row_top, width - margin, row_bottom]
                 font_size = 14
             else:
                 remaining = max(1, width - margin - value_left)
