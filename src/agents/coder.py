@@ -38,6 +38,8 @@ def read_coder_prompt():
     mode = os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower()
     if mode in {"baseline", "placement_v1", "typed_controls_v1"}:
         return prompt
+    if mode == "consumer_projection_v1":
+        return behavior_feedback_prompt(prompt, prompt_path) + "\n\n" + prompt_path.with_name("coder_consumer_projection.md").read_text(encoding="utf-8")
     if mode == "behavior_feedback_v1":
         return behavior_feedback_prompt(prompt, prompt_path)
     if mode == "functional_content_v1":
@@ -67,12 +69,15 @@ def behavior_feedback_prompt(prompt, prompt_path):
     return prompt + "\n\n" + functional + "\n\n" + prompt_path.with_name("coder_behavior_feedback.md").read_text(encoding="utf-8")
 
 
-def build_coder_user_content(ui_state_json, original_evidence=None):
+def build_coder_user_content(ui_state_json, original_evidence=None, consumer_projection=False):
     content = "Generate runnable frontend code from the following UI-State JSON.\n\n" + json.dumps(ui_state_json, ensure_ascii=False, indent=2)
     if original_evidence is not None:
         if not isinstance(original_evidence, str) or not original_evidence.strip():
             raise ValueError("ORIGINAL_EVIDENCE_MUST_BE_NONEMPTY_TEXT")
         content += "\n\nOriginal user ASR evidence (may contain transcription uncertainty; not evaluation answers):\n" + original_evidence
+    if consumer_projection:
+        from src.utils.consumer_projection import compile_consumer_projection, PROJECTION_SEPARATOR
+        content += PROJECTION_SEPARATOR + json.dumps(compile_consumer_projection(ui_state_json), ensure_ascii=False, indent=2)
     return content
 
 
@@ -136,7 +141,7 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, original_evid
     if os.getenv("UI_CODER_CONTRACT_MODE", "baseline") == "typed_controls_v1":
         from src.utils.placement_contract import component_instructions
         system_prompt += component_instructions(ui_state_json)
-    user_content = build_coder_user_content(ui_state_json, original_evidence)
+    user_content = build_coder_user_content(ui_state_json, original_evidence, consumer_projection=os.getenv("UI_CODER_CONTRACT_MODE", "baseline")=="consumer_projection_v1")
     model_to_use = os.getenv("CODER_MODEL", DEFAULT_CODER_MODEL)
 
     client = _get_openai_client()
