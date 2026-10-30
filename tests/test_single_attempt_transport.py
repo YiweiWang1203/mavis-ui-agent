@@ -133,3 +133,50 @@ def test_adapter_connected_to_real_pair_entry_without_network(tmp_path):
     assert len(calls)==4 and all(r['status']=='PIPELINE_RETURNED_NOT_ACCEPTED' for r in result['results'])
     assert len(list((tmp_path/'transport').glob('*_claim.json')))==4
     assert not list(tmp_path.rglob('*.html'))
+
+
+def partial_packet_worker(connection,request):
+    connection.send_bytes(b'SYNTHETIC_FIRST_CHUNK')
+    time.sleep(4)
+    connection.send({'ok':True})
+
+
+def delayed_packet_worker(connection,request):
+    time.sleep(4)
+    connection.send({'ok':True})
+
+
+def slow_decode(flag):
+    from pathlib import Path
+    Path(flag).write_text('decoder entered',encoding='utf-8')
+    time.sleep(4)
+    return {'ok':True}
+
+
+class SlowDecodedPacket:
+    def __init__(self,flag):self.flag=flag
+    def __reduce__(self):return slow_decode,(self.flag,)
+
+
+def slow_decode_worker(connection,request):
+    connection.send(SlowDecodedPacket(request['flag']))
+    time.sleep(4)
+
+
+@pytest.mark.parametrize('phase',['partial','late_complete','decode'])
+def test_complete_receipt_deadline_covers_stalled_transfer_and_decode(tmp_path,phase):
+    import multiprocessing
+    flag=tmp_path/'phase_entered.txt'
+    before={p.pid for p in multiprocessing.active_children()}
+    def receive_chunks(connection):
+        assert connection.recv_bytes()==b'SYNTHETIC_FIRST_CHUNK'
+        flag.write_text('first chunk consumed; awaiting rest',encoding='utf-8')
+        return connection.recv()
+    worker={'partial':partial_packet_worker,'late_complete':delayed_packet_worker,'decode':slow_decode_worker}[phase]
+    started=time.monotonic()
+    with pytest.raises(TimeoutError,match='HARD_REQUEST_DEADLINE'):
+        t.isolated_sdk_call({'flag':str(flag)},deadline=1.2,worker=worker,
+                            receive_packet=receive_chunks if phase=='partial' else None)
+    assert time.monotonic()-started<2.5 # stalled operation takes 4s without supervision
+    assert {p.pid for p in multiprocessing.active_children()}<=before
+    if phase in {'partial','decode'}:assert flag.exists() # proves the blocked stage was reached

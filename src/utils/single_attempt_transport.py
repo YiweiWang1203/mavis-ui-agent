@@ -58,19 +58,41 @@ def sdk_worker(connection, request):
         connection.close()
 
 
-def isolated_sdk_call(request, deadline=TIMEOUT, worker=sdk_worker):
-    """Hard elapsed deadline, in addition to SDK per-I/O timeout. No respawn."""
+def isolated_sdk_call(request, deadline=TIMEOUT, worker=sdk_worker, *, receive_packet=None):
+    """Supervise complete receipt/decoding, never block the supervisor on recv.
+
+    The daemon receiver owns the read handle and may not publish late results.
+    A stalled receiver is never joined without a bound. Killing the sole writer
+    releases normal partial reads; a pathological decoder may outlive this call
+    in its daemon thread, but cannot delay the caller or dispatch another API.
+    """
     context = multiprocessing.get_context('spawn')
     receive, send = context.Pipe(duplex=False)
     process = context.Process(target=worker, args=(send, request))
     started = time.monotonic()
+    cutoff = started + deadline
+    complete = threading.Event()
+    received = {}
+    receiver = None
+    def collect():
+        try:
+            received['packet'] = receive.recv() if receive_packet is None else receive_packet(receive)
+        except BaseException as exc:
+            received['error'] = exc
+        finally:
+            receive.close()
+            complete.set()
     try:
         process.start()
         send.close()
-        remaining = max(0, deadline - (time.monotonic() - started))
-        if not receive.poll(remaining):
+        receiver = threading.Thread(target=collect, daemon=True,
+                                    name='single-attempt-complete-receiver')
+        receiver.start()
+        if not complete.wait(max(0, cutoff - time.monotonic())) or time.monotonic() >= cutoff:
             raise TimeoutError('HARD_REQUEST_DEADLINE')
-        return receive.recv()
+        if 'error' in received:
+            raise received['error']
+        return received['packet']
     finally:
         if process.pid is not None:
             if process.is_alive():
@@ -79,7 +101,12 @@ def isolated_sdk_call(request, deadline=TIMEOUT, worker=sdk_worker):
             if process.is_alive():
                 process.kill()
                 process.join(timeout=5)
-        receive.close()
+        if receiver is None:
+            receive.close()
+        else:
+            # Never make timeout cleanup depend on completing a partial message
+            # or an unresponsive decoder. The receiver closes its own handle.
+            receiver.join(timeout=.05)
         send.close()
 
 
