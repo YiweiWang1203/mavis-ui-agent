@@ -5,6 +5,7 @@ import os
 from typing import Any
 
 from src.priors import apply_ui_priors
+from src.utils.functional_content import FunctionalContentRejected
 from src.utils.layout_solver import solve_ui_layout, TargetGeometryRejected
 from src.utils.pipeline_trace import traced_stage, trace_event
 
@@ -356,7 +357,7 @@ Return the final fused UI-State JSON.
             ui_state = refine_relation_state(ui_state, user_intent, planner_model, _get_openai_client(), mode=specialist_mode)
         return finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, preferred_locale)
 
-    except TargetGeometryRejected:
+    except (TargetGeometryRejected, FunctionalContentRejected):
         # Opt-in layout rejection is a terminal admission failure, never a
         # successful error-shaped UI-State eligible for Coder.
         raise

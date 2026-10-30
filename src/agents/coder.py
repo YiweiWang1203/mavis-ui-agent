@@ -38,6 +38,8 @@ def read_coder_prompt():
     mode = os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower()
     if mode in {"baseline", "placement_v1", "typed_controls_v1"}:
         return prompt
+    if mode == "functional_content_v1":
+        return prompt + "\n\n" + prompt_path.with_name("coder_functional_content.md").read_text(encoding="utf-8")
     if mode != "native_controls_v1":
         raise ValueError("UI_CODER_CONTRACT_MODE must be baseline, native_controls_v1, placement_v1 or typed_controls_v1")
     contract_path = prompt_path.with_name("coder_native_controls.md")

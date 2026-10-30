@@ -356,6 +356,9 @@ def solve_ui_layout(ui_state: dict[str, Any], layout_mode: str = "legacy",
     Every detected element is retained. The original box is stored as evidence_bbox;
     only the render bbox is expanded, aligned, and collision-repaired.
     """
+    if layout_mode == "functional_content_v1":
+        from src.utils.functional_content import compile_functional_content
+        return compile_functional_content(_preserve_target_layout(ui_state, coordinate_space))
     if layout_mode == "preserve_target":
         return _preserve_target_layout(ui_state, coordinate_space)
     if layout_mode != "legacy":
