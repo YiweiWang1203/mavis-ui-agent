@@ -75,6 +75,10 @@ def compile_functional_content(state):
                     raise FunctionalContentRejected('GROUP_EXTERNAL_OBSTRUCTION')
         for i in ids:
             element=by_id[i];rb=render[i]
+            element['render_geometry']={'coordinate_space':'target_px_xyxy',
+                'center_ratio':[(rb[0]+rb[2])/(2*view['width']),(rb[1]+rb[3])/(2*view['height'])],
+                'size_ratio':[(rb[2]-rb[0])/view['width'],(rb[3]-rb[1])/view['height']],
+                'aspect_ratio':(rb[2]-rb[0])/(rb[3]-rb[1])}
             element['functional_content']={'version':'functional-content-v1','group_ref':group['id'],
                 'role':'editable' if i==edit else 'tool','render_bbox':rb,'source_bbox':boxes[i],
                 'change_reason':'explicit_reviewed_group_functional_exclusion','coordinate_space':'target_px_xyxy'}

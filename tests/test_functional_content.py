@@ -79,3 +79,12 @@ def test_unrelated_legal_containment_not_rejected():
       {'id':'child','type':'text','text':'x','parent_id':'background','spatial_info':{'bbox':[10,10,50,50]}}]
     r=compile(s);baseline=solve_ui_layout(s,layout_mode='preserve_target',coordinate_space='target_px_xyxy')
     assert r['elements'][-2:]==baseline['elements'][-2:]
+
+
+def test_derived_geometry_uses_final_functional_rect():
+    r=compile(source());view=r['page_meta']['viewport']
+    for e in r['elements']:
+        b=e['functional_content']['render_bbox'];g=e['render_geometry']
+        assert g['center_ratio']==[(b[0]+b[2])/(2*view['width']),(b[1]+b[3])/(2*view['height'])]
+        assert g['size_ratio']==[(b[2]-b[0])/view['width'],(b[3]-b[1])/view['height']]
+        assert g['aspect_ratio']==(b[2]-b[0])/(b[3]-b[1])
