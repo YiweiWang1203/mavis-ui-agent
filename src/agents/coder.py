@@ -26,8 +26,9 @@ def _get_openai_client():
     from openai import OpenAI
 
     from src.utils.region_tree_contract import enabled as region_tree_enabled
+    from src.utils.paired_generation_policy import active as paired_active
     return OpenAI(api_key=api_key, base_url=DEFAULT_BASE_URL,
-                  **({'max_retries':0,'timeout':600} if region_tree_enabled() else {}))
+                  **({'max_retries':0,'timeout':600} if region_tree_enabled() or paired_active() else {}))
 
 
 def read_coder_prompt():
@@ -106,7 +107,7 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
             return {"code": code, "file_path": saved_path, "renderer": "deterministic"}
 
     system_prompt = read_coder_prompt()
-    if (ui_state_json.get('page_meta',{}).get('layout_solver') or {}).get('version') == 'hierarchy-v1':
+    if not region_tree_enabled() and (ui_state_json.get('page_meta',{}).get('layout_solver') or {}).get('version') == 'hierarchy-v1':
         system_prompt += "\nHierarchy contract overrides conflicting placement advice: preserve each id once, exact bbox size and page-global position; do not expand or globally repack controls. Render all elements absolutely under one positioned page root, and attach data-parent-id for non-root elements. Parent backgrounds are permitted behind children. Do not render children a second time through children_ids. Use border-box, zero root/body margins. Render visible region boundaries for drawn containers and image placeholders.\n"
     if os.getenv("UI_CODER_CONTRACT_MODE", "baseline") in {"placement_v1", "typed_controls_v1"}:
         from src.utils.placement_contract import placement_instructions
@@ -118,7 +119,9 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
         "Generate runnable frontend code from the following UI-State JSON.\n\n"
         f"{json.dumps(ui_state_json, ensure_ascii=False, indent=2)}"
     )
-    model_to_use = os.getenv("CODER_MODEL", DEFAULT_CODER_MODEL)
+    from src.utils.paired_generation_policy import request_options
+    options=request_options('coder', region_tree_enabled())
+    model_to_use = options.pop('model', os.getenv("CODER_MODEL", DEFAULT_CODER_MODEL))
 
     client = _get_openai_client()
     if client is None:
@@ -133,8 +136,7 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            temperature=0.2,
-            **({'max_tokens':8192,'timeout':600} if region_tree_enabled() else {}),
+            **options,
         )
 
         raw_code = response.choices[0].message.content or ""

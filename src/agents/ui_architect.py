@@ -326,15 +326,17 @@ Return the final fused UI-State JSON.
         print("UI Architect is fusing business intent with validated vision geometry...")
         planner_model = os.getenv("CODER_PROD_MODEL", os.getenv("CODER_MODEL", "deepseek-ai/DeepSeek-V3"))
 
+        from src.utils.paired_generation_policy import request_options
+        options=request_options('architect', region_tree_enabled())
+        planner_model=options.pop('model',planner_model)
         response = _get_openai_client().chat.completions.create(
             model=planner_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": request_content},
             ],
-            temperature=0.3,
             response_format={"type": "json_object"},
-            **({'max_tokens':8192,'timeout':600} if region_tree_enabled() else {}),
+            **options,
         )
 
         raw_json_str = response.choices[0].message.content

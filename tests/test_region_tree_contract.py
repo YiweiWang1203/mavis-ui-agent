@@ -15,7 +15,7 @@ def sample():
             {'id':'region_page','kind':'semantic_region','parent':None,'evidence':[{'source':'system_root'}],
              'layout':{'direction':'row','gap_px':8,'padding_px':0,'overflow':'visible'}}],
             'objects':[{'id':identity,'parent':'region_page','order':i,'evidence':copy.deepcopy(ev),'sizing':copy.deepcopy(size)} for i,identity in enumerate(['left','right'])]}}
-    vision={'canvas':{'width':406,'height':720},'elements':[{'id':e['id'],'type':e['type'],'text':e['text'],'bbox':{'x_min':0,'y_min':0,'x_max':1,'y_max':1}} for e in state['elements']]}
+    vision={'canvas':{'width':406,'height':720},'elements':[{'id':e['id'],'type':e['type'],'text':e['text'],'rpa_action':e['rpa_action'],'bbox':{'x_min':0,'y_min':0,'x_max':1,'y_max':1}} for e in state['elements']]}
     return state,vision
 
 

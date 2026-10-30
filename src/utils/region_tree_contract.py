@@ -63,6 +63,39 @@ def sizing(spec):
             'flexShrink':shrink,'alignSelf':'stretch' if cross=='stretch' else 'flex-start'}
 
 
+def observation_changes(state, vision, intent):
+    """Compare same-ID semantic fields; quotes establish provenance, not truth."""
+    planned={e['id']:e for e in state.get('elements',[])}
+    declarations=state.get('observation_change_evidence',[])
+    ledger=[];used=set()
+    for original in vision.get('elements',[]):
+        target=planned.get(original['id'],{})
+        for field in ('type','text','action','actions','rpa_action'):
+            if field not in original and field not in target:continue
+            before={'present':field in original,'value':copy.deepcopy(original.get(field))}
+            after={'present':field in target,'value':copy.deepcopy(target.get(field))}
+            if before==after:continue
+            matches=[(i,d) for i,d in enumerate(declarations) if d.get('id')==original['id'] and d.get('field')==field]
+            row={'id':original['id'],'field':field,'before':before,'after':after}
+            if len(matches)!=1:
+                row.update(status='UNSOURCED_CHANGE',reason='exactly one declaration required')
+            else:
+                i,d=matches[0];used.add(i);refs=d.get('evidence',[])
+                try:
+                    if d.get('before')!=before or d.get('after')!=after:raise ValueError('DECLARATION_VALUE_MISMATCH')
+                    if not d.get('reason') or not refs or any(x.get('source')!='asr' for x in refs):raise ValueError('ASR_REQUIRED_FOR_SEMANTIC_CHANGE')
+                    evidence(refs,intent,{e['id'] for e in vision['elements']})
+                    if field in original and (field not in target or target[field] in (None,'',[],{})) and original[field] not in (None,'',[],{}):raise ValueError('OBSERVED_CONTENT_LOST')
+                    row.update(status='ASR_SOURCED_PROPOSAL_NOT_SEMANTICALLY_CONFIRMED',evidence=copy.deepcopy(refs),reason=d['reason'])
+                except ValueError as exc:row.update(status='UNSOURCED_CHANGE',reason=str(exc))
+            ledger.append(row)
+    for i,d in enumerate(declarations):
+        if i not in used:ledger.append({'declaration':copy.deepcopy(d),'status':'UNSOURCED_CHANGE','reason':'unused or duplicate declaration'})
+    trace_event('region_tree.observation_changes',ledger=ledger,original_vision=vision)
+    if any(x['status']=='UNSOURCED_CHANGE' for x in ledger):raise ValueError('UNSOURCED_OBSERVATION_CHANGE')
+    return ledger
+
+
 def compile_region_tree(state, vision, intent):
     trace_event('region_tree.before',state=state,vision=vision)
     out=copy.deepcopy(state);elements=out.get('elements',[])
@@ -76,6 +109,8 @@ def compile_region_tree(state, vision, intent):
             refs=item.get('source_evidence',[])
             if not refs or any(x.get('source')!='asr' for x in refs):raise ValueError('NEW_OBJECT_REQUIRES_ASR')
             evidence(refs,intent,set(vids))
+    changes=observation_changes(out,vision,intent)
+    out['observation_provenance']={'original_vision':copy.deepcopy(vision),'changes':changes,'semantic_confirmation':'NOT_CONFIRMED_BY_REFERENCE_EXISTENCE'}
     contract=out.get('region_contract',{})
     if contract.get('version')!='region-tree-v1':raise ValueError('MISSING_REGION_CONTRACT')
     regions=contract.get('regions',[]);rids=[r.get('id') for r in regions];root=contract.get('root_id')
