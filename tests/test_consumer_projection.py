@@ -33,9 +33,12 @@ def test_duplicate_and_display_click_side_effects():
  p=compile_consumer_projection(state());r=compare_browser_observation(p,{'objects':[{'id':'a'},{'id':'a'}]})
  assert r['rows'][0]['failure_code']=='DUPLICATE_RENDERED_ID'
  a={'objects':[{'id':'b','text':'original'}]};b={'objects':[{'id':'b','text':'changed'}]}
- assert compare_display_click(p,'b',a,b)['status']=='FAIL'
- assert compare_display_click(p,'b',a,a)['status']=='PASS'
- assert compare_display_click(p,'b',{},a)['status']=='UNKNOWN'
+ op={'type':'ordinary_click','target_id':'b','evidence_ref':'actual_operation_1'}
+ assert compare_display_click(p,'b',a,b,op)['status']=='FAIL'
+ assert compare_display_click(p,'b',a,a,op)['status']=='PASS'
+ assert compare_display_click(p,'b',{},a,op)['status']=='UNKNOWN'
+ assert compare_display_click(p,'b',a,a)['status']=='UNKNOWN'
+ assert compare_display_click(p,'b',{'objects':[{'id':'b'}]},{'objects':[{'id':'b'}]},op)['status']=='UNKNOWN'
 
 def test_real_request_path_and_derived_only_information(monkeypatch):
  s=state();r={}

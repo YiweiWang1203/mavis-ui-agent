@@ -48,12 +48,14 @@ def compare_browser_observation(projection, observation, tolerance_css_px=0.001)
             'display_behavior':'UNKNOWN_requires_ordinary_browser_click','business_behavior':'UNKNOWN_requires_browser_acceptance'}
 
 
-def compare_display_click(projection, object_id, before, after):
+def compare_display_click(projection, object_id, before, after, operation=None):
     item=next((x for x in projection['objects'] if x['id']==object_id),None)
     if item is None or item['role']!='display_only':raise ValueError('NOT_EXPLICIT_DISPLAY_OBJECT')
+    if not isinstance(operation,dict) or operation.get('type')!='ordinary_click' or operation.get('target_id')!=object_id or not operation.get('evidence_ref'):
+        return {'object_id':object_id,'status':'UNKNOWN','failure_code':'NO_ORDINARY_CLICK_EVIDENCE'}
     a=[x for x in before.get('objects',[]) if x.get('id')==object_id]
     b=[x for x in after.get('objects',[]) if x.get('id')==object_id]
-    if len(a)!=1 or len(b)!=1:return {'object_id':object_id,'status':'UNKNOWN','failure_code':'MISSING_CLICK_EVIDENCE'}
+    if len(a)!=1 or len(b)!=1 or not isinstance(a[0].get('text'),str) or not isinstance(b[0].get('text'),str):return {'object_id':object_id,'status':'UNKNOWN','failure_code':'MISSING_CLICK_EVIDENCE'}
     return {'object_id':object_id,'expected':'ordinary click leaves display text unchanged','before':a[0].get('text'),'after':b[0].get('text'),
             'status':'PASS' if a[0].get('text')==b[0].get('text') else 'FAIL','failure_code':'' if a[0].get('text')==b[0].get('text') else 'DISPLAY_TEXT_MUTATED',
-            'scope':'text invariance only; no proof of absence of all hidden side effects'}
+            'operation_evidence':operation['evidence_ref'],'scope':'text invariance after evidenced ordinary click only; no proof of absence of all hidden side effects'}
