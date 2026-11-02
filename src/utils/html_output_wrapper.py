@@ -4,6 +4,10 @@ import re
 from html.parser import HTMLParser
 
 
+# Permit complete leading comments, including between doctype and root.
+_DOCUMENT_START = r'(?is)\s*(?:<!--.*?-->\s*)*(?:<!doctype\s+html[^>]*>\s*)?(?:<!--.*?-->\s*)*<html(?:\s|>)'
+
+
 class HtmlOutputError(ValueError):
     pass
 
@@ -13,7 +17,7 @@ def _require(value, code):
 
 
 def _validate_document(code):
-    _require(re.match(r'(?is)\s*(?:<!doctype\s+html[^>]*>\s*)?<html(?:\s|>)', code) is not None,
+    _require(re.match(_DOCUMENT_START, code) is not None,
              'HTML_DOCUMENT_START_REQUIRED')
     class Document(HTMLParser):
         def __init__(self): super().__init__(convert_charrefs=False); self.tags=[]
@@ -38,7 +42,7 @@ def parse_html_output(raw, *, finish_reason='stop'):
     _require(finish_reason=='stop', 'HTML_OUTPUT_NON_STOP')
     _require(isinstance(raw,str) and bool(raw.strip()), 'HTML_OUTPUT_EMPTY')
     left=len(raw)-len(raw.lstrip()); right=len(raw.rstrip()); trimmed=raw[left:right]
-    if re.match(r'(?is)(?:<!doctype\s+html[^>]*>\s*)?<html(?:\s|>)',trimmed):
+    if re.match(_DOCUMENT_START,trimmed):
         start,end=left,right; wrapper='plain_html'
     else:
         fences=[];offset=0

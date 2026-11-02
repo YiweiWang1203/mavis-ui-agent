@@ -60,3 +60,13 @@ def test_actual_coder_and_export_share_parser(tmp_path,monkeypatch):
  assert (tmp_path/'original_coder.html').read_bytes()==returned['code'].encode('utf-8')
  trace=json.loads(next((tmp_path/'trace').glob('*coder_output_wrapper.json')).read_text(encoding='utf-8'))
  assert trace['record']==record['output_wrapper']==parse_html_output(raw)['record']
+
+
+@pytest.mark.parametrize('prefix',['<!-- generated -->\n','<!-- <html><body>ignored</body></html> -->\n<!DOCTYPE html>\n','<!DOCTYPE html>\n<!-- root follows -->\n','<!-- a --> <!-- b -->\n'])
+def test_complete_plain_leading_comments_preserved(prefix):
+ raw=prefix+HTML
+ assert parse_html_output(raw)['code']==raw
+
+@pytest.mark.parametrize('prefix',['<!-- unclosed\n','<div>not a wrapper</div>\n','plain prose\n'])
+def test_not_complete_plain_document_prefix(prefix):
+ with pytest.raises(HtmlOutputError):parse_html_output(prefix+HTML)
