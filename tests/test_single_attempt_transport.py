@@ -127,7 +127,7 @@ def test_adapter_connected_to_real_pair_entry_without_network(tmp_path):
     def dispatch(req,deadline):
         calls.append(req)
         node='architect' if len(calls) in (1,3) else 'coder'
-        return packet(content=json.dumps(s) if node=='architect' else 'SYNTHETIC_NOT_A_PAGE')
+        return packet(content=json.dumps(s) if node=='architect' else '<html><body>SYNTHETIC OFFLINE FIXTURE</body></html>')
     adapter=t.SingleAttemptTransport(tmp_path/'transport','synthetic_pair',dispatch=dispatch)
     result=module.run_pair(v,'',t.MODEL,tmp_path/'pair',adapter,transport_identity='ADAPTER_WITH_SYNTHETIC_DISPATCH_NO_NETWORK')
     assert len(calls)==4 and all(r['status']=='PIPELINE_RETURNED_NOT_ACCEPTED' for r in result['results'])

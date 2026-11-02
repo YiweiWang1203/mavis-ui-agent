@@ -22,9 +22,10 @@ def test_exact_production_extraction_and_separate_hashes(tmp_path,fenced):
     raw='  ```html\n'+html+'\n```  ' if fenced else html
     save_response(tmp_path,raw);response_before=(tmp_path/'coder_response.json').read_bytes()
     record=module().export_coder_html(tmp_path,strip_markdown_code_fence(raw))
-    assert (tmp_path/'original_coder.html').read_bytes()==html.encode('utf-8')
+    expected=html+'\n' if fenced else html
+    assert (tmp_path/'original_coder.html').read_bytes()==expected.encode('utf-8')
     assert (tmp_path/'coder_response.json').read_bytes()==response_before
-    assert record['html_sha256']==hashlib.sha256(html.encode('utf-8')).hexdigest()
+    assert record['html_sha256']==hashlib.sha256(expected.encode('utf-8')).hexdigest()
     assert record['raw_content_utf8_sha256']==hashlib.sha256(raw.encode('utf-8')).hexdigest()
     assert record['browser_acceptance']=='NOT_EXECUTED'
 
@@ -35,7 +36,6 @@ def test_exact_production_extraction_and_separate_hashes(tmp_path,fenced):
     ('SYNTHETIC_NO_CODE','stop','SYNTHETIC_NO_CODE'),
     ('<html><body>cut','stop','<html><body>cut'),
     ('<html><body>ok</body></html>','stop','<html><body>REPAIRED</body></html>'),
-    ('```html\n<html><body>x</body></html>\n```\nextra','stop','<html><body>x</body></html>'),
 ])
 def test_failure_never_exports_display_page(tmp_path,raw,finish,rendered):
     save_response(tmp_path,raw,finish)

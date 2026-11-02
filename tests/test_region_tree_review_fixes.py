@@ -45,7 +45,7 @@ def test_actual_coder_prompt_isolates_old_marker(monkeypatch,new_mode):
     state=compile_region_tree(s,v,'') if new_mode else s;calls=[]
     def create(**kwargs):
         calls.append(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='SYNTHETIC'),finish_reason='stop')])
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='<html><body>SYNTHETIC OFFLINE FIXTURE</body></html>'),finish_reason='stop')])
     monkeypatch.setenv('UI_REGION_TREE_MODE','region_tree_v1' if new_mode else 'off');monkeypatch.setenv('UI_RENDERER_MODE','llm')
     monkeypatch.setattr(coder,'_get_openai_client',lambda:SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
     monkeypatch.setattr(coder,'save_html_asset',lambda code:None);coder.generate_frontend_code(state)
@@ -65,7 +65,7 @@ def test_shared_runner_budget_and_terminal_rules(tmp_path,finish):
     def transport(arm,node,request):
         calls.append((arm,node,request))
         if finish=='timeout':raise TimeoutError('synthetic timeout')
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(s) if node=='architect' else 'SYNTHETIC'),finish_reason=finish)])
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(s) if node=='architect' else '<html><body>SYNTHETIC OFFLINE FIXTURE</body></html>'),finish_reason=finish)])
     result=runner().run_pair(v,'','SYNTHETIC_MODEL',tmp_path/'pair',transport,transport_identity='SYNTHETIC_NO_NETWORK')
     assert len(calls)==(4 if finish=='stop' else 2)
     for arm,node,request in calls:

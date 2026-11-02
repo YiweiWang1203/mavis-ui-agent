@@ -35,7 +35,7 @@ def test_real_entry_details_and_mock_coder(tmp_path,invalid):
     s,v=sample();add_region(s);bad=copy.deepcopy(s);calls=[]
     for f in ('relation_status','order','sizing'):bad['region_contract']['regions'][1].pop(f)
     def transport(arm,node,request):
-        calls.append((arm,node));content=json.dumps(bad if invalid and arm=='candidate' else s) if node=='architect' else 'SYNTHETIC_NOT_A_PAGE'
+        calls.append((arm,node));content=json.dumps(bad if invalid and arm=='candidate' else s) if node=='architect' else '<html><body>SYNTHETIC OFFLINE FIXTURE</body></html>'
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content),finish_reason='stop')])
     out=runner().run_pair(v,'','SYNTHETIC_MODEL',tmp_path/'pair',transport,transport_identity='SYNTHETIC_ZERO_NETWORK')
     t=out['results'][1]

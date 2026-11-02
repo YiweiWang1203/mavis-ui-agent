@@ -156,7 +156,7 @@ def test_real_entry_rejects_candidate_contract_without_coder_or_retry(monkeypatc
     s,v=sample();bad=copy.deepcopy(s);bad['elements'][0].pop('parent');calls=[]
     def transport(arm,node,request):
         calls.append((arm,node))
-        content=json.dumps(bad if arm=='candidate' else s) if node=='architect' else 'SYNTHETIC_NOT_A_PAGE'
+        content=json.dumps(bad if arm=='candidate' else s) if node=='architect' else '<html><body>SYNTHETIC OFFLINE FIXTURE</body></html>'
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content),finish_reason='stop')])
     result=runner().run_pair(v,'','SYNTHETIC_MODEL',tmp_path/'pair',transport,transport_identity='SYNTHETIC_ZERO_NETWORK')
     assert calls==[('control','architect'),('control','coder'),('candidate','architect')]

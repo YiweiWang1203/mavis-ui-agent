@@ -28,7 +28,9 @@ def export_coder_html(folder, rendered_code):
     raw=response.get('content')
     if response.get('finish_reason')!='stop' or not isinstance(raw,str) or not raw.strip():
         raise ValueError('HTML_EXPORT_REQUIRES_NONEMPTY_STOP')
-    code=coder.strip_markdown_code_fence(raw)
+    from src.utils.html_output_wrapper import parse_html_output
+    parsed_output=parse_html_output(raw,finish_reason=response.get('finish_reason'))
+    code=parsed_output['code']
     if not code or code!=rendered_code:
         raise ValueError('HTML_EXTRACTION_MISMATCH_OR_EMPTY')
     class DocumentCheck(HTMLParser):
@@ -48,9 +50,10 @@ def export_coder_html(folder, rendered_code):
     record={'raw_response_file':str(response_path),'raw_response_sha256':hashlib.sha256(response_path.read_bytes()).hexdigest(),
             'raw_content_utf8_sha256':hashlib.sha256(raw.encode('utf-8')).hexdigest(),
             'html_file':str(path),'html_sha256':hashlib.sha256(data).hexdigest(),
-            'extraction':'production coder.strip_markdown_code_fence only; exact rendered_code equality',
+            'extraction':'shared parse_html_output; exact original substring and rendered_code equality',
+            'output_wrapper':parsed_output['record'],
             'completeness_gate':'one html/body start/end in document order and closing html suffix; not full HTML validity',
-            'mutations':'NONE beyond existing production fence/outer-whitespace extraction',
+            'mutations':'NONE within selected original substring',
             'browser_acceptance':'NOT_EXECUTED'}
     write(folder/'html_export.json',record)
     return record

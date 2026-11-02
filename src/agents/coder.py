@@ -52,19 +52,9 @@ def read_coder_prompt():
 
 
 def strip_markdown_code_fence(code: str) -> str:
-    """Return raw HTML when the model wraps output in a Markdown code fence."""
-    if not isinstance(code, str):
-        return ""
-    text = code.strip()
-    if not text.startswith("```"):
-        return text
-
-    lines = text.splitlines()
-    if lines and lines[0].strip().startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
+    """Compatibility entry: one shared, non-repairing HTML wrapper parser."""
+    from src.utils.html_output_wrapper import parse_html_output
+    return parse_html_output(code)['code']
 
 
 def save_html_asset(code: str) -> str | None:
@@ -140,7 +130,11 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
         )
 
         raw_code = response.choices[0].message.content or ""
-        code = strip_markdown_code_fence(raw_code)
+        from src.utils.html_output_wrapper import parse_html_output
+        from src.utils.pipeline_trace import trace_event
+        parsed_output = parse_html_output(raw_code, finish_reason=getattr(response.choices[0], 'finish_reason', None))
+        code = parsed_output['code']
+        trace_event('coder.output_wrapper', record=parsed_output['record'])
         trace_html_contract(code,ui_state_json,renderer='llm',
                     finish_reason=getattr(response.choices[0],'finish_reason',None))
 
