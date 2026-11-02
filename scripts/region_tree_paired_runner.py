@@ -99,6 +99,7 @@ def run_pair(vision,intent,model,out,transport,*,transport_identity,export_origi
         client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
         environment=dict(shared,UI_REGION_TREE_MODE='off' if arm=='control' else 'region_tree_v1')
         with patch.dict(os.environ,environment),patch.object(ui_architect,'_get_openai_client',return_value=client),patch.object(coder,'_get_openai_client',return_value=client),patch.object(coder,'save_html_asset',return_value=None),PipelineTrace(folder/'trace',metadata={'arm':arm,'transport_identity':transport_identity}):
+            state=None
             try:
                 state=ui_architect.generate_ui_state(intent,copy.deepcopy(vision))
                 write(folder/'ui_state.json',state)
@@ -107,7 +108,14 @@ def run_pair(vision,intent,model,out,transport,*,transport_identity,export_origi
                 if not isinstance(rendered,dict) or not rendered.get('code'):raise ValueError('CODER_CONTRACT_FAILED')
                 if export_original_html:export_coder_html(folder,rendered['code'])
                 result={'arm':arm,'status':'PIPELINE_RETURNED_NOT_ACCEPTED','requests_dispatched':len(requests[arm])}
-            except Exception as exc:result={'arm':arm,'status':'FAILED_NO_RETRY','exception_type':type(exc).__name__,'reason':str(exc),'requests_dispatched':len(requests[arm])}
+            except Exception as exc:
+                result={'arm':arm,'status':'FAILED_NO_RETRY','exception_type':type(exc).__name__,
+                        'reason':str(exc),'requests_dispatched':len(requests[arm])}
+                if isinstance(state,dict) and state.get('error'):
+                    result.update(original_error=state['error'],error_node=state.get('error_node','architect'),
+                                  error_details=copy.deepcopy(state.get('error_details',[])))
+        result['coder_dispatched']='coder' in requests[arm]
+        result['html_exists']=(folder/'original_coder.html').is_file()
         result['terminal_events']=terminal;write(folder/'terminal.json',result);results.append(result)
     differences={}
     for node in ('architect','coder'):

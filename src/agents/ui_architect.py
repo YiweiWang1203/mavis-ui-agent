@@ -368,7 +368,11 @@ Return the final fused UI-State JSON.
         return {"error": "JSON_PARSE_ERROR"}
     except Exception as exc:
         print(f"UI Architect failed: {exc}")
-        return {"error": str(exc)}
+        failure = {"error": str(exc)}
+        if hasattr(exc, 'diagnostics'):
+            failure.update(error_node='architect.finalize.region_tree',
+                           error_details=copy.deepcopy(exc.diagnostics))
+        return failure
 
 
 @traced_stage('architect.finalize')

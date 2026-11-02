@@ -124,6 +124,44 @@ def observation_changes(state, vision, intent):
     return ledger
 
 
+class RegionStructureError(ValueError):
+    """Original failure code plus non-mutating, independently checkable fields."""
+    def __init__(self, diagnostics):
+        self.diagnostics = copy.deepcopy(diagnostics)
+        super().__init__(diagnostics[0]['error'])
+
+
+def preflight_required_fields(elements, regions, root):
+    # Presence only. Invalid values, provenance and tree semantics remain later gates.
+    diagnostics = []
+    codes = {'parent':'EXPLICIT_PARENT_REQUIRED', 'relation_status':'INVALID_RELATION_STATUS',
+             'order':'INVALID_SIBLING_ORDER', 'sizing':'MISSING_SIZING',
+             'evidence':'MISSING_RELATION_EVIDENCE', 'kind':'REGIONS_MUST_BE_ORGANIZATIONAL',
+             'layout':'UNSUPPORTED_REGION_LAYOUT'}
+    for collection, nodes in (('regions', regions), ('elements', elements)):
+        for index, node in enumerate(nodes):
+            is_root = collection == 'regions' and node.get('id') == root
+            required = ['parent', 'evidence'] if is_root else ['parent','relation_status','order','sizing','evidence']
+            if collection == 'regions': required += ['kind','layout']
+            base = f"region_contract.regions[{index}]" if collection == 'regions' else f"elements[{index}]"
+            for field in required:
+                if field not in node:
+                    diagnostics.append({'node_id':node.get('id'), 'node_kind':collection,
+                        'field_path':base+'.'+field, 'field':field, 'error':codes[field],
+                        'status':'MISSING_REQUIRED_FIELD'})
+            for container, fields in (('sizing', ('basis_px','grow','shrink')),
+                                      ('layout', ('direction','gap_px','padding_px','overflow'))):
+                if container == 'sizing' and is_root: continue
+                if container == 'layout' and collection != 'regions': continue
+                if isinstance(node.get(container), dict):
+                    for field in fields:
+                        if field not in node[container]:
+                            diagnostics.append({'node_id':node.get('id'), 'node_kind':collection,
+                                'field_path':base+'.'+container+'.'+field, 'field':container+'.'+field,
+                                'error':codes[container], 'status':'MISSING_REQUIRED_FIELD'})
+    if diagnostics: raise RegionStructureError(diagnostics)
+
+
 def _compile_region_tree(state, vision, intent):
     trace_event('region_tree.before',state=state,vision=vision)
     if 'observation_change_evidence' in state:raise ValueError('LEGACY_REPEATED_CHANGE_LEDGER')
@@ -134,6 +172,7 @@ def _compile_region_tree(state, vision, intent):
     regions=contract['regions']
     if not isinstance(elements,list) or not isinstance(regions,list) or not all(isinstance(x,dict) for x in elements+regions):
         raise ValueError('INVALID_PLAN_NODES')
+    preflight_required_fields(elements, regions, contract.get('root_id'))
     for node in elements+regions:
         if any(key in node for key in ('objects','elements','regions','children','children_ids','members','member_ids','parent_id')):
             raise ValueError('NESTED_OR_DUPLICATE_PARENT_MAPPING')
@@ -209,5 +248,6 @@ def compile_region_tree(state, vision, intent):
     try:return _compile_region_tree(state,vision,intent)
     except (ValueError,TypeError,KeyError) as exc:
         trace_event('region_tree.rejected',error=str(exc),exception_type=type(exc).__name__,
-                    outcome='NO_CODER_NO_AUTOMATIC_REPAIR',semantic_support='UNKNOWN')
+                    outcome='NO_CODER_NO_AUTOMATIC_REPAIR',semantic_support='UNKNOWN',
+                    diagnostics=getattr(exc,'diagnostics',[]),node='architect.finalize.region_tree')
         raise

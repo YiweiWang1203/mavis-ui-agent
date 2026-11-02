@@ -5,20 +5,27 @@ Single canonical region_contract schema (version region-tree-v2):
   "page_meta":{"viewport":{"width":1440,"height":900}},
   "elements":[
     {"id":"original_visual_id","type":"original type","text":"original text",
-     "parent":"region_page","order":0,"relation_status":"unknown",
+     "parent":"region_group","order":0,"relation_status":"proposed",
      "sizing":{"basis_px":"auto","grow":0,"shrink":1,"cross":"intrinsic"},
-     "evidence":[{"source":"model_inference","reason":"membership unresolved; root is mechanical storage only"}]}
+     "evidence":[{"source":"model_inference","reason":"generic proposed grouping, not a confirmed user relationship"}]}
   ],
   "region_contract":{
     "version":"region-tree-v2","root_id":"region_page",
     "regions":[
       {"id":"region_page","kind":"semantic_region","parent":null,
        "evidence":[{"source":"system_root"}],
-       "layout":{"direction":"column","gap_px":0,"padding_px":0,"overflow":"visible"}}
+       "layout":{"direction":"column","gap_px":0,"padding_px":0,"overflow":"visible"}},
+      {"id":"region_group","kind":"semantic_region","parent":"region_page",
+       "order":0,"relation_status":"proposed",
+       "sizing":{"basis_px":"auto","grow":1,"shrink":1,"cross":"stretch"},
+       "evidence":[{"source":"model_inference","reason":"generic grouping proposal; semantics require review"}],
+       "layout":{"direction":"column","gap_px":8,"padding_px":8,"overflow":"visible"}}
     ]
   }
 }
 This illustrates schema, not a layout template, object count or new requirement. Choose the requested TARGET viewport, not photo dimensions. Business objects occur only in elements; organizational regions occur only in flat regions. Never emit region_contract.objects, nested objects/children/member lists, parent_id, or another mapping. Put parent/order/sizing/evidence on each element itself. Keep original business properties, text, source references and spatial_info unless an explicitly sourced refinement is necessary. Organizational regions add no visible label, action or business object.
+
+Root requires parent=null, evidence, kind and layout; root order/sizing/relation_status are exempt. Regions and business objects sharing a parent share ONE sibling order namespace (for example a child region at order 0 and a direct business object at order 1).
 
 Every non-root node explicitly includes parent (existing region ID), unique nonnegative sibling order, sizing, relation_status (proposed or unknown), and evidence. Add only necessary semantic regions, every region reaching the sole root without cycles. Each region has kind=semantic_region and layout. For unknown membership use parent=root, relation_status=unknown and a model_inference reason; mechanical reachability does not confirm page membership. Code will not guess missing parents, flatten nested regions or repair invalid trees.
 
