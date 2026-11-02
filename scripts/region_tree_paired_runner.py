@@ -59,11 +59,12 @@ def export_coder_html(folder, rendered_code):
     return record
 
 
-def run_pair(vision,intent,model,out,transport,*,transport_identity,export_original_html=False):
+def run_pair(vision,intent,model,out,transport,*,transport_identity,export_original_html=False,comparison='legacy_vs_region'):
     """transport(arm,node,request) returns SDK-shaped response. Never retries.
     Failure stops that arm; the other frozen arm is still accounted separately.
     Caller must authorize any external transport separately. CLI uses synthetic only.
     """
+    if comparison not in {'legacy_vs_region','region_relation_v1'}:raise ValueError('INVALID_COMPARISON')
     out=Path(out);out.mkdir(parents=True,exist_ok=False)
     payload={'vision':vision,'intent':intent}
     write(out/'shared_input.json',payload)
@@ -72,7 +73,7 @@ def run_pair(vision,intent,model,out,transport,*,transport_identity,export_origi
         UI_NEUTRAL_VISUAL_MODE='neutral_v1',UI_STRUCTURE_MODE='baseline',UI_RENDERER_MODE='llm',
         UI_RELATION_SPECIALIST_MODE='off',UI_INPUT_SEMANTIC_AUDIT_MODE='off',UI_SEMANTIC_TYPE_MODE='off',
         UI_COORDINATE_RESPONSIBILITY_MODE='off',UI_RELATION_AGGREGATION_MODE='off',
-        UI_FUSION_MODE='exact_id',UI_CODER_CONTRACT_MODE='baseline',UI_INPUT_CONTRACT_MODE='off',
+        UI_FUSION_MODE='exact_id',UI_CODER_CONTRACT_MODE='baseline',UI_INPUT_CONTRACT_MODE='off',UI_REGION_RELATION_MODE='off',
         CODER_PROD_MODEL=model,CODER_MODEL=model)
     requests={};results=[]
     for arm in ('control','candidate'):
@@ -100,7 +101,8 @@ def run_pair(vision,intent,model,out,transport,*,transport_identity,export_origi
                 terminal.append({'node':node,'status':'REQUEST_FAILED','exception_type':type(exc).__name__,'elapsed_seconds':time.monotonic()-started})
                 raise
         client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        environment=dict(shared,UI_REGION_TREE_MODE='off' if arm=='control' else 'region_tree_v1')
+        environment=dict(shared,UI_REGION_TREE_MODE='off' if arm=='control' and comparison=='legacy_vs_region' else 'region_tree_v1')
+        if comparison=='region_relation_v1' and arm=='candidate':environment['UI_REGION_RELATION_MODE']='relation_first_v1'
         with patch.dict(os.environ,environment),patch.object(ui_architect,'_get_openai_client',return_value=client),patch.object(coder,'_get_openai_client',return_value=client),patch.object(coder,'save_html_asset',return_value=None),PipelineTrace(folder/'trace',metadata={'arm':arm,'transport_identity':transport_identity}):
             state=None
             try:
@@ -128,7 +130,7 @@ def run_pair(vision,intent,model,out,transport,*,transport_identity,export_origi
             'shared_policy_equal': bool(a and b) and all(a.get(k)==b.get(k) for k in ('model','temperature','max_tokens','timeout')),
             'messages':{role:{'equal':bool(a and b) and a['messages'][i]==b['messages'][i]} for i,role in enumerate(('system','user'))}}
     write(out/'request_diff.json',differences)
-    summary={'transport':transport_identity,'input_sha256':digest,'model':model,'max_tokens':8192,'timeout_seconds':600,'max_retries':0,'max_requests':4,'results':results,'browser':'NOT_EXECUTED','effect':'NOT_EVALUATED','new_html_files':len(list(out.glob('*/original_coder.html'))),'html_export_enabled':export_original_html}
+    summary={'comparison':comparison,'transport':transport_identity,'input_sha256':digest,'model':model,'max_tokens':8192,'timeout_seconds':600,'max_retries':0,'max_requests':4,'results':results,'browser':'NOT_EXECUTED','effect':'NOT_EVALUATED','new_html_files':len(list(out.glob('*/original_coder.html'))),'html_export_enabled':export_original_html}
     write(out/'summary.json',summary);return summary
 
 

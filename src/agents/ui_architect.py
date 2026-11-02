@@ -295,6 +295,9 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
     if region_tree_enabled():
         from pathlib import Path
         system_prompt = (Path(__file__).resolve().parents[1]/'prompts/ui_architect_region_tree_v1.md').read_text(encoding='utf-8')
+        from src.utils.region_relations import enabled as relations_enabled
+        if relations_enabled():
+            system_prompt += '\n\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_region_relations_v1.md').read_text(encoding='utf-8')
     semantic_mode=os.getenv('UI_SEMANTIC_TYPE_MODE','off')
     if semantic_mode not in {'off','declare_spoken_input_v1','spoken_input_v1'}:
         raise ValueError('Unsupported semantic type mode')

@@ -12,6 +12,8 @@ NEUTRAL = {'primary_surface':'#FFFFFF','secondary_surface':'#F5F6F8','divider':'
 def enabled():
     mode=os.getenv('UI_REGION_TREE_MODE','off')
     if mode not in {'off','region_tree_v1'}:raise ValueError('INVALID_REGION_TREE_MODE')
+    from src.utils.region_relations import enabled as relations_enabled
+    relations_enabled()  # Reject an invalid or incompatible opt-in, including tree-off.
     if mode=='off':return False
     forbidden={'UI_STRUCTURE_MODE':'baseline','UI_RELATION_SPECIALIST_MODE':'off',
         'UI_INPUT_SEMANTIC_AUDIT_MODE':'off','UI_SEMANTIC_TYPE_MODE':'off',
@@ -240,6 +242,9 @@ def _compile_region_tree(state, vision, intent):
     out['source_coordinate_evidence']={'vision':copy.deepcopy(vision),
         'architect_spatial_by_id':{e['id']:copy.deepcopy(e.get('spatial_info')) for e in elements}}
     if out['elements']!=state['elements']:raise AssertionError('BUSINESS_OBJECT_MUTATED')
+    from src.utils.region_relations import enabled as relations_enabled, verify_relation_plan
+    if relations_enabled():
+        out['relation_review']=verify_relation_plan(out,vision,intent)
     trace_event('region_tree.after',state=out)
     return out
 
