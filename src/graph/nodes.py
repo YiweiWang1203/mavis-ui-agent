@@ -493,12 +493,13 @@ def ui_architect_node(state: State) -> Command[Literal["supervisor"]]:
         pass
     
     # === 1. 强制隔离逻辑 ===
-    original_prompt = state["messages"][0].content
-    intent = state.get("voice_intent", "用户未提供音频需求。")
+    from src.service.planner_input import build_planner_intent
+    original_prompt = build_planner_intent(state)
     vision_elements = state.get("vision_elements")
 
     # 如果用户提供了图片标记，则必须有有效的视觉输出
-    image_present = bool(re.search(r'\[IMAGE\]:\s*([^\s\n]+)', original_prompt))
+    image_present = bool(state.get('image_path') or state.get('recognition_image_path')
+                         or re.search(r'\[IMAGE\]:\s*([^\s\n]+)', original_prompt))
     if image_present:
         vision_status = state.get('vision_status')
         if not vision_elements or not vision_status or not vision_status.get('valid'):
@@ -514,7 +515,7 @@ def ui_architect_node(state: State) -> Command[Literal["supervisor"]]:
             )
 
     # 正常的数据合成业务逻辑
-    combined_intent = f"【总体审美要求】\n{original_prompt}\n\n【语音/文本细节需求】\n{intent}"
+    combined_intent = original_prompt
     result_json = generate_ui_state(combined_intent, vision_elements, preferred_locale=state.get("preferred_locale"))
 
     try:
@@ -526,7 +527,7 @@ def ui_architect_node(state: State) -> Command[Literal["supervisor"]]:
     except Exception:
         pass
     
-    # 做法：假设 generate_ui_state 内部已经确保了元素的坐标是匹配标准 375x812 的
+    # The planner returns coordinates in its declared target viewport.
 
     return Command(
         update={
