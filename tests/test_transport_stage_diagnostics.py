@@ -72,6 +72,8 @@ def test_logging_failure_does_not_change_packet_or_raise(tmp_path):
     assert 'provider_request_id' not in rows(path)[0]
     observe(SECRET)
     assert len(rows(path))==1
+    observe.close();observe('worker_started')
+    assert len(rows(path))==1
 
 
 def test_default_dispatch_supplies_same_diagnostics_without_changing_requests(tmp_path,monkeypatch):
@@ -155,3 +157,16 @@ def test_abrupt_worker_exit_reports_ipc_error_without_retry(tmp_path):
     events=stages(tmp_path/'parent.jsonl')
     assert 'ipc_receive_error' in events and 'hard_deadline_reached' not in events
     assert events.count('worker_spawned')==1
+
+
+def test_late_receiver_cannot_mutate_terminal_evidence(tmp_path):
+    def slow_receive(connection):
+        packet=connection.recv()
+        time.sleep(1)
+        return packet
+    with pytest.raises(TimeoutError):
+        t.isolated_sdk_call({},deadline=.6,worker=successful_worker,
+                            diagnostics_directory=tmp_path,receive_packet=slow_receive)
+    original=(tmp_path/'parent.jsonl').read_bytes()
+    time.sleep(1)
+    assert (tmp_path/'parent.jsonl').read_bytes()==original

@@ -35,6 +35,11 @@ class StageRecorder:
     def __init__(self, path):
         self.path = Path(path) if path is not None else None
         self.lock = threading.Lock()
+        self.closed = False
+
+    def close(self):
+        with self.lock:
+            self.closed = True
 
     def __call__(self, stage, *, http_status=None, provider_request_id=None,
                  pid=None, exit_code=None, error_type=None):
@@ -49,8 +54,11 @@ class StageRecorder:
             if isinstance(value,str) and re.fullmatch(r'[A-Za-z0-9_.:\-]{1,128}',value):
                 row[name] = value
         try:
-            with self.lock, self.path.open('a',encoding='utf-8') as stream:
-                stream.write(json.dumps(row,ensure_ascii=True)+'\n')
+            with self.lock:
+                if self.closed:
+                    return
+                with self.path.open('a',encoding='utf-8') as stream:
+                    stream.write(json.dumps(row,ensure_ascii=True)+'\n')
         except OSError:
             pass  # observability failure is not a request failure or retry trigger
 
@@ -192,6 +200,7 @@ def isolated_sdk_call(request, deadline=TIMEOUT, worker=sdk_worker, *, receive_p
             receiver.join(timeout=.05)
         send.close()
         observe('supervisor_finished')
+        observe.close()  # a late daemon decode must not mutate already-packaged evidence
 
 
 class SingleAttemptTransport:
