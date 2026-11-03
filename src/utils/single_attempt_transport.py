@@ -7,11 +7,63 @@ from pathlib import Path
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 BASE_URL = 'https://api.siliconflow.cn/v1'
 MODEL = 'Qwen/Qwen3-VL-32B-Instruct'
 TIMEOUT = 600
+
+STAGES = frozenset({
+    'supervisor_started', 'worker_spawn_requested', 'worker_spawned',
+    'ipc_receive_started', 'ipc_receive_complete', 'ipc_receive_error',
+    'hard_deadline_reached', 'worker_terminate_requested', 'worker_kill_requested',
+    'worker_exit', 'supervisor_finished', 'worker_started', 'client_create_started',
+    'client_create_complete', 'sdk_call_started', 'http_request_hook',
+    'http_response_headers', 'sdk_call_returned', 'serialization_started',
+    'serialization_complete', 'ipc_send_started', 'ipc_send_complete',
+    'worker_exception', 'worker_finished',
+})
+
+
+class StageRecorder:
+    """Best-effort metadata only; never accepts headers, URLs, bodies or messages.
+
+    Parent and worker use separate files. Missing events mean UNKNOWN, never
+    evidence that the event did not happen. Logging failure cannot cause a retry.
+    """
+    def __init__(self, path):
+        self.path = Path(path) if path is not None else None
+        self.lock = threading.Lock()
+
+    def __call__(self, stage, *, http_status=None, provider_request_id=None,
+                 pid=None, exit_code=None, error_type=None):
+        if self.path is None or stage not in STAGES:
+            return
+        row = {'stage':stage, 'utc':datetime.now(timezone.utc).isoformat(),
+               'monotonic_seconds':time.monotonic()}
+        for name, value in (('http_status',http_status), ('pid',pid), ('exit_code',exit_code)):
+            if type(value) is int:
+                row[name] = value
+        for name, value in (('provider_request_id',provider_request_id), ('error_type',error_type)):
+            if isinstance(value,str) and re.fullmatch(r'[A-Za-z0-9_.:\-]{1,128}',value):
+                row[name] = value
+        try:
+            with self.lock, self.path.open('a',encoding='utf-8') as stream:
+                stream.write(json.dumps(row,ensure_ascii=True)+'\n')
+        except OSError:
+            pass  # observability failure is not a request failure or retry trigger
+
+
+def http_event_hooks(observe):
+    def request_hook(request):
+        # Called before HTTP transport. Does NOT prove connection or server receipt.
+        observe('http_request_hook')
+    def response_hook(response):
+        # HTTPX response hook occurs on headers, before the body is necessarily read.
+        observe('http_response_headers',http_status=response.status_code,
+                provider_request_id=response.headers.get('x-request-id'))
+    return {'request':[request_hook], 'response':[response_hook]}
 
 
 def write_new(path, value):
@@ -24,15 +76,16 @@ def client_configuration():
             'http_transport_retries':0, 'follow_redirects':False, 'trust_env':False}
 
 
-def build_client():
+def build_client(observe=None):
     # Lazy imports: the offline CLI and import-time checks need neither package.
     import httpx
     from openai import OpenAI
     key = os.environ.get('SILICONFLOW_API_KEY') or os.environ.get('OPENAI_API_KEY')
     if not key:
         raise ValueError('MISSING_EXISTING_CREDENTIAL')
+    hooks = {'event_hooks':http_event_hooks(observe)} if observe is not None else {}
     http = httpx.Client(transport=httpx.HTTPTransport(retries=0),
-                        timeout=TIMEOUT, follow_redirects=False, trust_env=False)
+                        timeout=TIMEOUT, follow_redirects=False, trust_env=False, **hooks)
     try:
         client = OpenAI(api_key=key, base_url=BASE_URL, max_retries=0,
                         timeout=TIMEOUT, http_client=http)
@@ -44,21 +97,38 @@ def build_client():
         raise
 
 
-def sdk_worker(connection, request):
+def sdk_worker(connection, request, *, diagnostics_path=None):
     """One SDK create only. Exception messages/credentials never cross the pipe."""
+    observe = StageRecorder(diagnostics_path)
+    observe('worker_started',pid=os.getpid())
     try:
-        with build_client() as client:
+        observe('client_create_started')
+        with (build_client(observe) if diagnostics_path is not None else build_client()) as client:
+            observe('client_create_complete')
+            observe('sdk_call_started')
             response = client.chat.completions.create(**request)
-            connection.send({'ok':True, 'response':response.model_dump(),
+            observe('sdk_call_returned',provider_request_id=getattr(response, '_request_id', None))
+            observe('serialization_started')
+            data = response.model_dump()
+            observe('serialization_complete')
+            observe('ipc_send_started')
+            connection.send({'ok':True, 'response':data,
                              'provider_request_id':getattr(response, '_request_id', None)})
+            observe('ipc_send_complete')
     except BaseException as exc:
+        observe('worker_exception',error_type=type(exc).__name__,
+                http_status=getattr(exc, 'status_code', None))
+        observe('ipc_send_started')
         connection.send({'ok':False, 'error_type':type(exc).__name__,
                          'http_status':getattr(exc, 'status_code', None)})
+        observe('ipc_send_complete')
     finally:
+        observe('worker_finished')
         connection.close()
 
 
-def isolated_sdk_call(request, deadline=TIMEOUT, worker=sdk_worker, *, receive_packet=None):
+def isolated_sdk_call(request, deadline=TIMEOUT, worker=sdk_worker, *, receive_packet=None,
+                      diagnostics_directory=None):
     """Supervise complete receipt/decoding, never block the supervisor on recv.
 
     The daemon receiver owns the read handle and may not publish late results.
@@ -68,27 +138,37 @@ def isolated_sdk_call(request, deadline=TIMEOUT, worker=sdk_worker, *, receive_p
     """
     context = multiprocessing.get_context('spawn')
     receive, send = context.Pipe(duplex=False)
-    process = context.Process(target=worker, args=(send, request))
+    diagnostics = Path(diagnostics_directory) if diagnostics_directory is not None else None
+    kwargs = {'diagnostics_path':diagnostics/'worker.jsonl'} if diagnostics is not None else {}
+    process = context.Process(target=worker, args=(send, request), kwargs=kwargs)
     started = time.monotonic()
     cutoff = started + deadline
+    observe = StageRecorder(diagnostics/'parent.jsonl' if diagnostics is not None else None)
+    observe('supervisor_started')
     complete = threading.Event()
     received = {}
     receiver = None
     def collect():
+        observe('ipc_receive_started')
         try:
             received['packet'] = receive.recv() if receive_packet is None else receive_packet(receive)
+            observe('ipc_receive_complete')
         except BaseException as exc:
             received['error'] = exc
+            observe('ipc_receive_error',error_type=type(exc).__name__)
         finally:
             receive.close()
             complete.set()
     try:
+        observe('worker_spawn_requested')
         process.start()
+        observe('worker_spawned',pid=process.pid)
         send.close()
         receiver = threading.Thread(target=collect, daemon=True,
                                     name='single-attempt-complete-receiver')
         receiver.start()
         if not complete.wait(max(0, cutoff - time.monotonic())) or time.monotonic() >= cutoff:
+            observe('hard_deadline_reached')
             raise TimeoutError('HARD_REQUEST_DEADLINE')
         if 'error' in received:
             raise received['error']
@@ -96,11 +176,14 @@ def isolated_sdk_call(request, deadline=TIMEOUT, worker=sdk_worker, *, receive_p
     finally:
         if process.pid is not None:
             if process.is_alive():
+                observe('worker_terminate_requested')
                 process.terminate()
             process.join(timeout=5)
             if process.is_alive():
+                observe('worker_kill_requested')
                 process.kill()
                 process.join(timeout=5)
+            observe('worker_exit',exit_code=process.exitcode)
         if receiver is None:
             receive.close()
         else:
@@ -108,6 +191,7 @@ def isolated_sdk_call(request, deadline=TIMEOUT, worker=sdk_worker, *, receive_p
             # or an unresponsive decoder. The receiver closes its own handle.
             receiver.join(timeout=.05)
         send.close()
+        observe('supervisor_finished')
 
 
 class SingleAttemptTransport:
@@ -165,7 +249,20 @@ class SingleAttemptTransport:
         terminal={'request_id':request_id,'provider_request_id':None,'usage':None,
                   'currency_cost':None,'missing_cost_is_not_zero':True}
         try:
-            packet=self.dispatch(request,deadline=TIMEOUT)
+            if self.dispatch is isolated_sdk_call:
+                diagnostics = self.directory/(slot+'_stages')
+                diagnostics.mkdir(exist_ok=False)
+                terminal['stage_diagnostics'] = {
+                    'schema':'metadata_stages_v1', 'directory':diagnostics.name,
+                    'missing_events':'UNKNOWN_NOT_PROOF_OF_ABSENCE',
+                    'http_request_hook':'BEFORE_TRANSPORT_NOT_SERVER_RECEIPT',
+                    'http_response_headers':'BODY_COMPLETION_UNKNOWN',
+                    'not_observed':['connect_TLS','actual_server_receipt','partial_body_bytes',
+                                    'IPC_partial_bytes','unpickle_progress'],
+                }
+                packet=self.dispatch(request,deadline=TIMEOUT,diagnostics_directory=diagnostics)
+            else:
+                packet=self.dispatch(request,deadline=TIMEOUT)
             terminal['http_status']=packet.get('http_status')
             if not packet.get('ok'):
                 terminal['sdk_error_type']=packet.get('error_type')
