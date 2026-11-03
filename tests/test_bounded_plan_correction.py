@@ -70,7 +70,10 @@ def test_failed_correction_never_dispatches_coder_or_retry(tmp_path,failure):
     old,v,i,env,req=fixture();calls=[]
     if failure=='production':env['corrected_plan']['region_contract']['regions'][0]['layout']['direction']='column'
     if failure=='invariant':env['corrected_plan']['elements'][0]['actions']=[]
-    if failure=='ledger':env['relation_changes']=[]
+    if failure=='ledger':
+        env['corrected_plan']['relation_plan']['relations'][0]['evidence'].append(
+            {'source':'model_inference','reason':'actual change requires a ledger row'})
+        env['relation_changes']=[]
     if failure=='empty':env['corrected_plan']['relation_plan']['relations']=[]
     if failure=='unknown':env['corrected_plan']['relation_plan']['relations'][0]['status']='unknown'
     def dispatch(request,deadline):
@@ -116,6 +119,8 @@ def test_drop_unsupported_proposition_allowed_with_source_not_coverage():
 @pytest.mark.parametrize('issue',['missing','false_operation','bad_quote','all_unknown','empty'])
 def test_changes_cannot_hide_loss_or_fabricate_evidence(issue):
     old,v,i,env,req=fixture();new=env['corrected_plan'];changes=env['relation_changes']
+    if issue in {'missing','false_operation'}:
+        new['relation_plan']['relations'][0]['evidence'].append({'source':'model_inference','reason':'changed annotation'})
     if issue=='missing':changes.clear()
     if issue=='false_operation':changes[0]['operation']='drop'
     if issue=='bad_quote':
@@ -144,3 +149,47 @@ def test_no_empty_gate_uses_assert_in_executable_modules():
     root=Path(__file__).resolve().parents[1]
     for name in ('src/utils/bounded_plan_correction.py','scripts/run_bounded_plan_correction.py'):
         assert 'assert ' not in (root/name).read_text(encoding='utf-8')
+
+
+@pytest.mark.parametrize('notes',[
+    None, [],
+    [{'id':'rel_synthetic','operation':'keep','reason':'optional note','evidence':[{'source':'asr','quote':'first left of second'}]}],
+    [{'id':'rel_synthetic','operation':'keep','reason':'invalid note retained','evidence':[{'source':'asr','quote':'not in source'}]}],
+    [{'id':'rel_synthetic','operation':'drop','reason':'false annotation cannot delete a claim','evidence':[]}],
+])
+def test_code_derives_keep_and_notes_never_become_effective_sources(notes):
+    old,v,i,env,req=fixture();new=env['corrected_plan']
+    supplied=[] if notes is None else copy.deepcopy(notes)
+    result=correction_invariants(old,new,supplied,v,i)
+    row=result['relation_changes'][0]
+    assert row['operation']=='keep' and row['before']==row['after'] and row['evidence']==[]
+    assert row['audit_annotation_unvalidated']==(supplied[0] if supplied else None)
+    assert row['annotation_evidence_status']=='NOT_USED_AS_EFFECTIVE_SOURCE'
+    assert result['source_coverage']=='NOT_EVALUATED'
+    if supplied and supplied[0]['evidence'] and supplied[0]['evidence'][0]['quote']=='not in source':
+        assert row['annotation_warnings'][0]['code']=='UNKNOWN_QUOTE_ABSENT'
+    if supplied and supplied[0]['operation']=='drop':
+        assert row['annotation_warnings'][0]['code']=='DECLARED_OPERATION_DISAGREES_WITH_DERIVED_KEEP'
+
+
+def test_real_stopped_answer_compatibility_does_not_override_original_production_gate(monkeypatch):
+    import hashlib,os
+    from unittest.mock import patch
+    from src.utils.bounded_plan_correction import ENVIRONMENT
+    from src.agents.ui_architect import finalize_ui_state
+    location=os.environ.get('BOUNDED_CORRECTION_STOPPED_FIXTURE')
+    if not location:pytest.skip('External real stopped-answer fixture not configured')
+    p=Path(location)
+    paths=[p/'inputs/original_answer.txt',p/'results/architect_response.json']
+    hashes=[hashlib.sha256(x.read_bytes()).hexdigest() for x in paths]
+    old=json.loads(paths[0].read_text(encoding='utf-8'))
+    envelope=json.loads(json.loads(paths[1].read_text(encoding='utf-8'))['content'])
+    vision=json.loads((p/'inputs/vision.json').read_text(encoding='utf-8'))
+    intent=(p/'inputs/intent.txt').read_text(encoding='utf-8')
+    result=correction_invariants(old,envelope['corrected_plan'],envelope['relation_changes'],vision,intent)
+    assert any(x.get('annotation_warnings') for x in result['relation_changes'])
+    assert result['source_coverage']=='NOT_EVALUATED'
+    # POST-HOC OFFLINE CHECK ONLY: original raw plan is not repaired or reclassified.
+    with patch.dict(os.environ,ENVIRONMENT),pytest.raises(ValueError,match='UNKNOWN_QUOTE_ABSENT'):
+        finalize_ui_state(copy.deepcopy(envelope['corrected_plan']),intent,copy.deepcopy(vision),'baseline')
+    assert hashes==[hashlib.sha256(x.read_bytes()).hexdigest() for x in paths]

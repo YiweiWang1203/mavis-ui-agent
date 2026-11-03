@@ -31,11 +31,12 @@ THIS request supersedes the original top-level output shape only:
 {"corrected_plan": <complete plan under the original contract>,
  "relation_changes": [{"id": "<relation id>", "operation": "keep|modify|drop|downgrade|add",
  "reason": "<reason for this decision>", "evidence": [<original-contract source items>]}]}
-Return JSON only. Supply exactly one ledger row for every old or new relation ID.
-Keep existing relation IDs for retained/modified propositions. Code derives and
-saves the exact old/new values; the ledger is not independent confirmation.
-For an unchanged relation use operation=keep and evidence=[]; changed, dropped,
-downgraded or added relations require original-contract evidence plus a reason.
+Return JSON only. Supply one ledger row for each changed, dropped, downgraded or
+added relation ID, with original-contract evidence plus a reason. Unchanged IDs
+need no model ledger row: code derives keep from exact old/new JSON equivalence.
+Optional unchanged-ID notes are retained as unvalidated audit annotations, never
+as effective source evidence. Keep existing IDs for retained/modified propositions.
+Code saves the exact old/new values; the ledger is not independent confirmation.
 You may correct, withdraw or mark unknown an unsupported original proposition;
 do not preserve incorrect relationships merely to pass a retention count. Explain
 each change/withdrawal using the ORIGINAL input and its traceable sources. Quotes
@@ -114,20 +115,44 @@ def correction_invariants(before, after, changes, vision, intent):
     require(bool(new_claims), 'EMPTY_RELATION_ESCAPE')
     require(any(x.get('status') == 'proposed' for x in new_claims.values()), 'ALL_UNKNOWN_RELATION_ESCAPE')
     decisions = unique_by_id(changes, 'RELATION_LEDGER_IDS_INVALID')
-    require(set(decisions) == set(old_claims) | set(new_claims), 'INCOMPLETE_RELATION_LEDGER')
+    all_ids = set(old_claims) | set(new_claims)
+    changed_ids = {cid for cid in all_ids if old_claims.get(cid) != new_claims.get(cid)}
+    require(changed_ids <= set(decisions) <= all_ids, 'INCOMPLETE_OR_UNKNOWN_RELATION_LEDGER')
     ledger = []
     visual_ids = {x['id'] for x in vision['elements']}
-    for cid in sorted(decisions):
+    for cid in sorted(all_ids):
         old, new = old_claims.get(cid), new_claims.get(cid)
         operation = ('add' if old is None else 'drop' if new is None else 'keep' if old == new
                      else 'downgrade' if old.get('status') == 'proposed' and new.get('status') == 'unknown'
                      else 'modify')
-        row = decisions[cid]
+        row = decisions.get(cid)
+        if operation == 'keep':
+            # Model notes cannot change the derived operation or become verified
+            # sources. Preserve them verbatim, including invalid extra evidence.
+            warnings = []
+            annotation_check = 'NO_ANNOTATION_EVIDENCE'
+            if row is not None and row.get('evidence'):
+                try:
+                    evidence(row['evidence'], intent, visual_ids)
+                    annotation_check = 'VALID_FORMAT_LOCATION_ONLY_NOT_EFFECTIVE_SOURCE'
+                except (ValueError, TypeError, KeyError) as exc:
+                    annotation_check = 'INVALID_ANNOTATION_SOURCE_NOT_EFFECTIVE_SOURCE'
+                    warnings.append(dict(code=str(exc), scope='annotation_only_not_production_claim'))
+            if row is not None and row.get('operation') != 'keep':
+                warnings.append(dict(code='DECLARED_OPERATION_DISAGREES_WITH_DERIVED_KEEP',
+                                     scope='untrusted_annotation'))
+            ledger.append(dict(id=cid, operation='keep', before=copy.deepcopy(old), after=copy.deepcopy(new),
+                               reason='Code-derived exact old/new JSON equivalence', evidence=[],
+                               audit_annotation_unvalidated=copy.deepcopy(row),
+                               annotation_evidence_status='NOT_USED_AS_EFFECTIVE_SOURCE',
+                               annotation_syntax_check=annotation_check, annotation_warnings=warnings,
+                               semantic_support='UNKNOWN', source_coverage='NOT_EVALUATED_BY_MECHANICAL_GATE',
+                               removed_or_unknown_not_coverage=new.get('status') == 'unknown'))
+            continue
         require(set(row) == {'id', 'operation', 'reason', 'evidence'}, 'INVALID_CHANGE_LEDGER_FIELDS')
         require(row['operation'] == operation, 'MISREPORTED_RELATION_OPERATION:' + cid)
         require(isinstance(row['reason'], str) and bool(row['reason'].strip()), 'CHANGE_REASON_REQUIRED')
-        resolved = evidence(row['evidence'], intent, visual_ids) if operation != 'keep' else []
-        require(operation != 'keep' or row['evidence'] == [], 'KEEP_LEDGER_EVIDENCE_MUST_BE_EMPTY')
+        resolved = evidence(row['evidence'], intent, visual_ids)
         ledger.append(dict(id=cid, operation=operation, before=copy.deepcopy(old), after=copy.deepcopy(new),
                            reason=row['reason'], evidence=resolved,
                            semantic_support='UNKNOWN', source_coverage='NOT_EVALUATED_BY_MECHANICAL_GATE',
