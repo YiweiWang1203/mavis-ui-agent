@@ -137,7 +137,9 @@ def main() -> int:
     parser.add_argument("--locale", choices=["auto", "zh-CN", "en"], default="auto", help="UI locale override")
     parser.add_argument("--rotate-degrees", type=int, choices=[0, 90, 180, 270], default=180)
     parser.add_argument("--disable-orientation-correction", action="store_true")
-    parser.add_argument("--enable-asr", action="store_true", help="Enable ASR during preprocessing")
+    parser.add_argument("--enable-asr", action="store_true", default=True, help="ASR is on in the main video configuration")
+    parser.add_argument("--run-id", help="Unique main-system run identity")
+    parser.add_argument("--legacy-pipeline", action="store_true", help="Explicitly retain the historical unbounded diagnostic path")
     parser.add_argument(
         "--disable-layout-solver",
         action="store_true",
@@ -157,6 +159,19 @@ def main() -> int:
     )
     parser.add_argument("--full-graph", action="store_true", help="Run the planner/supervisor LangGraph instead of the deterministic pipeline")
     args = parser.parse_args()
+
+    if not args.legacy_pipeline and not args.full_graph:
+        if args.disable_layout_solver or args.disable_orientation_correction or args.renderer not in {"auto", "llm"} or args.vision_image_mode != "recognition":
+            parser.error("Main video config fixes layout preservation, orientation correction, LLM renderer and recognition input; conflicting legacy switches require --legacy-pipeline")
+        from datetime import datetime, timezone
+        from src.service.main_ui_workflow import run_main_video
+        run_id = args.run_id or ("video_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+        output = Path(args.output) / run_id
+        terminal = run_main_video(video_path=args.video, user_prompt=args.prompt,
+            output_dir=output, run_id=run_id, rotate_degrees=args.rotate_degrees,
+            image_path=args.image, preferred_locale=args.locale)
+        print(json.dumps(terminal, ensure_ascii=False, indent=2))
+        return 0 if terminal.get("html_generated") else 1
 
     if args.disable_layout_solver:
         os.environ["LAYOUT_SOLVER_ENABLED"] = "0"

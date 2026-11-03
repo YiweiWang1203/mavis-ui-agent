@@ -73,6 +73,17 @@ class PlatformRatioInferencer:
         if not text:
             return None
         t = text.lower()
+        import re
+        # Remove only locally negated target phrases, not whole clauses (e.g. 不错).
+        target = r"(?:电脑(?:页面|界面|端|屏幕)?|手机(?:页面|界面|端|屏幕)?|平板|pc|desktop|mobile|phone|tablet)"
+        t = re.sub(r"(?:不是|不要|不做|不用|无需|并非|not\s+|no\s+)(?:做|生成|设计)?\s*" + target, "", t)
+        # Match computer target expressions, not incidental use of a computer.
+        desktop_target = re.search(r"电脑(?:页面|界面|端|屏幕大小)", t)
+        mobile_target = re.search(r"手机(?:页面|界面|端|屏幕大小)|移动端", t)
+        if desktop_target and not mobile_target:
+            return "desktop"
+        if mobile_target and not desktop_target:
+            return "mobile"
         mobile_keywords = ["手机", "移动端", "小程序", "app", "h5", "phone", "mobile"]
         desktop_keywords = ["网页端", "pc", "后台", "管理系统", "dashboard", "desktop", "web admin"]
         tablet_keywords = ["平板", "tablet"]

@@ -20,6 +20,10 @@ DEFAULT_PC_VIEWPORT = {"width": 1440, "height": 900}
 
 
 def _get_openai_client():
+    from src.service.main_model_runtime import main_client
+    bounded = main_client("architect")
+    if bounded is not None:
+        return bounded
     from openai import OpenAI
 
     return OpenAI(
@@ -416,9 +420,20 @@ def finalize_ui_state(ui_state, user_intent, vision_elements, structure_mode, pr
     priorized = apply_ui_priors(repaired, user_intent=user_intent, vision_elements=vision_elements)
     # This call follows compilation into the chosen target viewport; raw photo
     # or normalized vision coordinates must not enter the opt-in preservation.
-    return solve_ui_layout(priorized,
-        layout_mode=os.getenv("UI_LAYOUT_MODE", "legacy"),
-        coordinate_space="target_px_xyxy")
+    try:
+        return solve_ui_layout(priorized,
+            layout_mode=os.getenv("UI_LAYOUT_MODE", "legacy"),
+            coordinate_space="target_px_xyxy")
+    except TargetGeometryRejected as error:
+        if os.getenv("UI_MAIN_LAYOUT_REPORT_ONLY") != "1":
+            raise
+        # Report unresolved upstream geometry; never repair it by inventing boxes.
+        result = copy.deepcopy(priorized)
+        result.setdefault("page_meta", {})["layout_admission"] = {
+            "status": "UNRESOLVED_REPORT_ONLY", "diagnostic": error.args[0],
+            "geometry_changed": False, "browser_acceptance": "UNKNOWN"}
+        trace_event("architect.layout_report_only", output=result)
+        return result
 
 
 if __name__ == "__main__":

@@ -656,7 +656,9 @@ def vision_node(state: State) -> Command[Literal["supervisor"]]:
         }, goto="supervisor")
 
     # Do not mutate state in place; prepare updates via Command
-    max_retries = 1
+    max_retries = int(os.getenv("VISION_MAX_RETRIES", "1"))
+    if max_retries not in (0, 1):
+        raise ValueError("VISION_MAX_RETRIES must be zero or one")
     retry_count = 0
     audit = al
 
@@ -687,6 +689,8 @@ def vision_node(state: State) -> Command[Literal["supervisor"]]:
             'previous_diagnostics': raw_out.get('diagnostics') if isinstance(raw_out, dict) else None,
             'complexity': complexity,
         }
+        from src.service.main_model_runtime import note_vision_repair
+        note_vision_repair(repair_feedback)
         try:
             raw_out2 = vision_tool.extract_ui_layout(
                 image_path=image_path,
@@ -779,7 +783,12 @@ def code_node(state: State) -> Command[Literal["supervisor"]]:
     # 解决方案：直接调用 generate_frontend_code 函数，只传递 UI-State JSON
     from src.agents.coder import generate_frontend_code
     al = state.get('_audit_logger_instance')
-    result = generate_frontend_code(ui_json, audit_logger=al)
+    if os.getenv("UI_CODER_CONTRACT_MODE") == "main_system_v1":
+        result = generate_frontend_code(ui_json, audit_logger=al,
+            original_user_request=state.get("original_user_request", ""),
+            asr_transcript=state.get("asr_transcript", ""))
+    else:
+        result = generate_frontend_code(ui_json, audit_logger=al)
     
     # 处理返回结果
     if isinstance(result, dict):

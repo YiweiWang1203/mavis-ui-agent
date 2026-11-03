@@ -20,6 +20,10 @@ DEFAULT_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn
 
 
 def _get_openai_client():
+    from src.service.main_model_runtime import main_client
+    bounded = main_client("coder")
+    if bounded is not None:
+        return bounded
     api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("SILICONFLOW_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None
@@ -36,6 +40,8 @@ def read_coder_prompt():
     except FileNotFoundError:
         prompt = "Generate a complete runnable HTML file from the provided UI-State JSON."
     mode = os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower()
+    if mode == "main_system_v1":
+        return prompt + "\n\n" + prompt_path.with_name("coder_native_controls.md").read_text(encoding="utf-8") + "\n\n" + prompt_path.with_name("coder_main_system.md").read_text(encoding="utf-8")
     if mode in {"baseline", "placement_v1", "typed_controls_v1"}:
         return prompt
     if mode != "native_controls_v1":
@@ -45,31 +51,65 @@ def read_coder_prompt():
 
 
 def strip_markdown_code_fence(code: str) -> str:
-    """Return raw HTML when the model wraps output in a Markdown code fence."""
+    """Remove a single explicit Markdown wrapper without searching HTML strings."""
     if not isinstance(code, str):
         return ""
     text = code.strip()
-    if not text.startswith("```"):
+    # Raw documents are never cropped at an apparent tag in script/comment data.
+    if text.lower().startswith(("<!doctype", "<html")):
         return text
-
-    lines = text.splitlines()
-    if lines and lines[0].strip().startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
+    import re
+    fences = list(re.finditer(r"(?m)^```[^\r\n]*\r?$", text))
+    if not fences:
+        return text
+    if len(fences) != 2 or fences[0].group().strip().lower() not in {"```html", "```"} or fences[1].group().strip() != "```":
+        raise ValueError("AMBIGUOUS_OR_INCOMPLETE_HTML_FENCES")
+    start = fences[0].end()
+    if text[start:start+2] == "\r\n":
+        start += 2
+    elif text[start:start+1] == "\n":
+        start += 1
+    end = fences[1].start()
+    if text[max(start,end-2):end] == "\r\n":
+        end -= 2
+    elif text[max(start,end-1):end] == "\n":
+        end -= 1
+    return text[start:end]
 
 
 def save_html_asset(code: str) -> str | None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_path = HTML_OUTPUT_DIR / f"html_generated_{timestamp}.html"
+    run_id = os.getenv("MAVIS_MAIN_RUN_ID")
+    output_dir = HTML_OUTPUT_DIR
+    if run_id:
+        import re
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", run_id):
+            raise ValueError("INVALID_MAIN_RUN_ID")
+        output_dir = output_dir / run_id
+    file_path = output_dir / f"html_generated_{timestamp}.html"
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text(code, encoding="utf-8")
+    with file_path.open("x", encoding="utf-8") as stream:
+        stream.write(code)
     return str(file_path.resolve())
 
 
+def is_complete_html_document(code: str) -> bool:
+    from html.parser import HTMLParser
+    class Roots(HTMLParser):
+        starts = 0
+        ends = 0
+        def handle_starttag(self, tag, attrs):
+            if tag == 'html': self.starts += 1
+        def handle_endtag(self, tag):
+            if tag == 'html': self.ends += 1
+    parser = Roots()
+    parser.feed(code)
+    parser.close()
+    return parser.starts == parser.ends == 1
+
+
 @traced_stage('coder.generate', fields={'ui_state_json'})
-def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str:
+def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_user_request: str = "", asr_transcript: str = "") -> dict | str:
     """Generate runnable frontend HTML from a UI-State JSON contract."""
     renderer_mode = os.getenv("UI_RENDERER_MODE", "auto").strip().lower()
     # Reject the retired artifact-repair switch instead of silently altering HTML.
@@ -108,6 +148,8 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
         "Generate runnable frontend code from the following UI-State JSON.\n\n"
         f"{json.dumps(ui_state_json, ensure_ascii=False, indent=2)}"
     )
+    if os.getenv("UI_CODER_CONTRACT_MODE") == "main_system_v1":
+        user_content += "\n\n[Original User Request]\n" + original_user_request + "\n\n[Fresh ASR Transcript]\n" + asr_transcript
     model_to_use = os.getenv("CODER_MODEL", DEFAULT_CODER_MODEL)
 
     client = _get_openai_client()
@@ -128,6 +170,8 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None) -> dict | str
 
         raw_code = response.choices[0].message.content or ""
         code = strip_markdown_code_fence(raw_code)
+        if os.getenv("UI_CODER_CONTRACT_MODE") == "main_system_v1" and not is_complete_html_document(code):
+            raise ValueError("INCOMPLETE_HTML_DOCUMENT")
         trace_html_contract(code,ui_state_json,renderer='llm',
                     finish_reason=getattr(response.choices[0],'finish_reason',None))
 

@@ -385,6 +385,8 @@ def prepare_workflow_input(
         "recognition_image_path": (video_result or {}).get("recognition_image_path"),
         "layout_image_path": (video_result or {}).get("layout_image_path"),
         "vision_image_mode": (video_result or {}).get("vision_image_mode") or ("user_image" if not video_result else vision_image_mode),
+        "original_user_request": user_text,
+        "asr_transcript": (video_result or {}).get("transcript_text", ""),
         "voice_intent": None,
         "vision_elements": None,
         "vision_status": None,

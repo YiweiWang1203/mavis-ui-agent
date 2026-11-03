@@ -1,0 +1,11 @@
+# Main system implementation contract
+
+The original user request and fresh ASR transcript accompany the UI-State. They are original requirements, not evaluator assertions. Use them to implement the intended local interactions without inventing a backend or claiming a remote service exists. Keep every independent object and the supplied target geometry; do not add case-specific templates or silently resize/repack a preserve-target layout.
+
+Implement input editing, native buttons, selection, opening and closing relevant panels, and requested visible state changes when supported by these sources. A generic alert with only an action id is insufficient for a specifically requested image change, detail display or sending behavior. Local simulation is allowed and must be described as such. Do not invent payment, real account or real voice-service integration.
+
+Display-only text, labels, images, lines and container backgrounds must not acquire a business click merely because the base template mentions handleRPA. Only bind an operation to these objects when the supplied sources explicitly require it. Keep interactive controls keyboard accessible; native inputs must retain typing and focus. Do not turn all elements into buttons.
+
+For preserve-target-v1, render each object once at its supplied bbox with border-box sizing. Use native control structure and typography hints. Do not expand controls over adjacent objects. Do not interpret source image dimensions or evidence_bbox as the target viewport. When render_geometry is present it describes the same compiled target placement, not an independent redesign permission.
+
+Return one complete HTML document. Basic layout and control styles must have inline CSS so a blocked style CDN cannot make the page empty or unusable. External image failures should have a visible local placeholder without claiming the requested image content loaded. Do not include a self-evaluation report.

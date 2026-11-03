@@ -24,6 +24,8 @@ class State(MessagesState):
     current_step: int
     
     # --- 🌟 新增：多模态 UI 自动化专属数据契约 ---
+    original_user_request: Optional[str]
+    asr_transcript: Optional[str]
     voice_intent: Optional[str]        # 存储提取出的语音意图
     image_path: Optional[str]
     vision_elements: Optional[dict]    # 存储提取出的控件坐标字典 (VisionLayout.dict())

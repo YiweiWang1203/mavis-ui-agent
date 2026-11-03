@@ -260,8 +260,9 @@ def extract_ui_layout(image_path: str,
     # prepare messages
     api_key = os.getenv('SILICONFLOW_API_KEY') or os.getenv('VL_API_KEY') or os.getenv('OPENAI_API_KEY')
     model = os.getenv('VISION_MODEL') or os.getenv('DEFAULT_VISION_MODEL')
-    client = None
-    if api_key and model:
+    from src.service.main_model_runtime import main_client
+    client = main_client("vision")
+    if client is None and api_key and model:
         try:
             client = OpenAI(api_key=api_key, base_url=os.getenv('SILICONFLOW_BASE_URL') or os.getenv('VISION_BASE_URL'))
         except Exception:

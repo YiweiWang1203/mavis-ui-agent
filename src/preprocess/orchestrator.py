@@ -49,12 +49,12 @@ class PreAgentOrchestrator:
             logger.error("video decompose failed: %s", e)
             raise
 
-        # step 3: ASR (MVP: skip or mock)
+        # step 3: real ASR; failure is explicit, never substitute mock text.
         logger.info("ASR step started")
         transcript = ""
         if input_data.enable_asr:
-            # placeholder for ASR
-            transcript = "[mock transcript]"
+            from .asr_adapter import transcribe_audio
+            transcript = transcribe_audio(vres.audio_path, str(out_dir / "asr"))
         logger.info("ASR step completed")
 
         logger.info("Final sketch selection started")
@@ -134,7 +134,8 @@ class PreAgentOrchestrator:
             rectified_sketch_path=rect_res.rectified_sketch_path,
             normalized_sketch_path=norm_res.normalized_sketch_path,
             platform_hint=platform_res,
-            preprocess_metadata={"video_meta": vres.metadata},
+            preprocess_metadata={"video_meta": vres.metadata,
+                                 "transcript_source": "funasr" if input_data.enable_asr else "none"},
             errors=errors,
             warnings=warnings,
             orientation_result=orientation_result,
