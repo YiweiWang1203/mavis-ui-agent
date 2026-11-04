@@ -198,7 +198,7 @@ def save_direct_html(raw, finish_reason, output, *, compact_assets=False, allow_
     }
 
 
-def submit_direct_html(request, output, *, compact_assets=False):
+def submit_direct_html(request, output, *, compact_assets=False, allow_bounded_css_svg=False):
     client = main_client("direct_coder")
     if client is None:
         raise RuntimeError("DIRECT_BASELINE_REQUIRES_BOUNDED_RUNTIME")
@@ -206,7 +206,8 @@ def submit_direct_html(request, output, *, compact_assets=False):
         system, *rest = request["messages"]
         request = {**request, "messages": [{**system, "content": system["content"] + "\n\n" + ASSET_RULES}, *rest]}
     choice = client.chat.completions.create(**request).choices[0]
-    result = save_direct_html(choice.message.content, choice.finish_reason, output, compact_assets=compact_assets)
+    result = save_direct_html(choice.message.content, choice.finish_reason, output, compact_assets=compact_assets,
+                              allow_bounded_css_svg=allow_bounded_css_svg)
     if compact_assets:
         result["asset_policy"] = DIRECT_ASSET_POLICY
     trace_event("direct_multimodal_baseline.html", **result)
