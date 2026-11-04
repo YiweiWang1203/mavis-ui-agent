@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import math
 import os
 from typing import Any
 
@@ -214,7 +215,8 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
         model_elements = []
 
     fusion_mode = os.getenv('UI_FUSION_MODE', 'exact_id')
-    if fusion_mode not in {'exact_id', 'source_alignment_v1'}:
+    target_layout = fusion_mode == 'target_layout_v1'
+    if fusion_mode not in {'exact_id', 'source_alignment_v1', 'target_layout_v1'}:
         raise ValueError('Unsupported UI_FUSION_MODE')
     if fusion_mode == 'source_alignment_v1':
         from src.utils.source_alignment import align_source_ids
@@ -225,6 +227,33 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
             'matched_count': sum(d['vision_id'] is not None for d in alignment),
             'unresolved_count': sum(d['vision_id'] is None for d in alignment)}
 
+    target_matches = {}
+    if target_layout:
+        ids = [e.get("id") for e in model_elements if isinstance(e, dict)]
+        named = [i for i in ids if isinstance(i, str) and i]
+        if len(named) != len(set(named)):
+            raise ValueError("Duplicate planner IDs in target layout")
+        claims = {}
+        for index, candidate in enumerate(model_elements):
+            if not isinstance(candidate, dict):
+                continue
+            old_id = candidate.get("id")
+            if old_id in vision_by_id:
+                target_matches[index] = old_id
+                continue
+            refs = candidate.get("source_refs")
+            vision_refs = [r.get("id") for r in refs if isinstance(r, dict)
+                           and r.get("source") == "vision"] if isinstance(refs, list) else []
+            if len(vision_refs) == 1 and isinstance(vision_refs[0], str) and vision_refs[0] in vision_by_id:
+                claims.setdefault(vision_refs[0], []).append(index)
+        reserved = set(target_matches.values())
+        for vid, indices in claims.items():
+            if vid not in reserved and len(indices) == 1:
+                target_matches[indices[0]] = vid
+        trace_event("architect.target_source_identity", matches=target_matches,
+                    unresolved_indices=[i for i in range(len(model_elements)) if i not in target_matches],
+                    explicit_claims=claims, policy="exact_id_then_unique_explicit_ref")
+
     used_ids: set[str] = set()
     decisions = []
     repaired_elements: list[dict[str, Any]] = []
@@ -234,8 +263,44 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
             continue
         element = copy.deepcopy(model_element)
         element_id = element.get("id") or f"e{index}"
+        if target_layout and not element.get("id"):
+            element_id = f"architect_only_{index}"
+            while element_id in vision_by_id or element_id in named or element_id in used_ids:
+                element_id += "_"
+        if target_layout:
+            used_ids.add(element_id)
         element["id"] = element_id
-        vision_element = vision_by_id.get(element_id)
+        vision_id = target_matches.get(index - 1) if target_layout else element_id
+        vision_element = vision_by_id.get(vision_id)
+        if target_layout:
+            spatial = element.get("spatial_info")
+            if not isinstance(spatial, dict):
+                spatial = element["spatial_info"] = {}
+            bbox = spatial.get("bbox")
+            valid = (isinstance(bbox, list) and len(bbox) == 4
+                     and all(type(v) in (int, float) and math.isfinite(v) for v in bbox)
+                     and 0 <= bbox[0] < bbox[2] <= viewport["width"]
+                     and 0 <= bbox[1] < bbox[3] <= viewport["height"]
+                     and (str(element.get("type", "")).lower() in {"line", "divider"}
+                          or min(bbox[2]-bbox[0], bbox[3]-bbox[1]) > 1))
+            element["source_refs"] = [{"source": "architect", "id": element_id}]
+            if vision_element:
+                used_ids.add(vision_id)
+                element["source_refs"].insert(0, {"source": "vision", "id": vision_id})
+                element.setdefault("type", vision_element.get("type", "unknown"))
+                if not element.get("text"):
+                    element["text"] = vision_element.get("text") or vision_element.get("description") or ""
+                spatial["evidence_bbox"] = copy.deepcopy(vision_element["bbox"])
+                spatial["evidence_coordinate_space"] = "vision_normalized"
+                if not valid:
+                    spatial["bbox"] = _pixel_bbox_from_normalized(vision_element["bbox"], viewport)
+            spatial["source"] = ("planner_target_bbox" if valid else
+                                 "projected_vision_fallback" if vision_element else "unresolved_target_bbox")
+            element.setdefault("rpa_action", "")
+            repaired_elements.append(element)
+            decisions.append({"id": element_id, "vision_id": vision_id, "decision": spatial["source"],
+                              "planner_bbox": bbox, "compiled_bbox": spatial.get("bbox")})
+            continue
 
         if vision_element:
             element.setdefault("type", vision_element.get("type", "unknown"))
@@ -265,8 +330,12 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
     for vision_id, vision_element in vision_by_id.items():
         if vision_id not in used_ids:
             fallback = _fallback_element_from_vision(vision_element, viewport)
-            if fusion_mode == 'source_alignment_v1':
+            if fusion_mode in {'source_alignment_v1', 'target_layout_v1'}:
                 fallback['source_refs'] = [{'source': 'vision', 'id': vision_id}]
+            if target_layout:
+                fallback["spatial_info"].update(evidence_bbox=copy.deepcopy(vision_element["bbox"]),
+                                                evidence_coordinate_space="vision_normalized",
+                                                source="projected_vision_fallback")
             repaired_elements.append(fallback)
             decisions.append({'id':vision_id,'decision':'append_vision_fallback','reason':'vision_id_not_used_by_model'})
 
@@ -295,6 +364,9 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
             system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/ui_architect_node_evidence.md').read_text(encoding='utf-8')
     else:
         system_prompt = read_ui_architect_prompt()
+        if os.getenv("UI_FUSION_MODE") == "target_layout_v1":
+            from pathlib import Path
+            system_prompt = (Path(__file__).resolve().parents[1] / "prompts/ui_architect_main_target.md").read_text(encoding="utf-8")
     semantic_mode=os.getenv('UI_SEMANTIC_TYPE_MODE','off')
     if semantic_mode not in {'off','declare_spoken_input_v1','spoken_input_v1'}:
         raise ValueError('Unsupported semantic type mode')

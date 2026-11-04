@@ -12,7 +12,7 @@
     "UI_RENDERER_MODE": "llm",
     "UI_CODER_CONTRACT_MODE": "main_system_v1",
     "UI_LAYOUT_MODE": "preserve_target",
-    "UI_FUSION_MODE": "source_alignment_v1",
+    "UI_FUSION_MODE": "target_layout_v1",
     "UI_INPUT_CONTRACT_MODE": "off",
     "UI_STRUCTURE_MODE": "baseline",
     "UI_SEMANTIC_TYPE_MODE": "off",
