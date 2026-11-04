@@ -1,8 +1,35 @@
 """Validate the production region tree and derive source evidence."""
+from copy import deepcopy
+import os
 import re
 from html.parser import HTMLParser
 
 from src.utils.pipeline_trace import trace_event
+
+
+def normalize_region_plan(plan):
+    if os.getenv("UI_REGION_PLAN_NORMALIZATION") != "row_bottom_alias_v1" or not isinstance(plan, dict):
+        return plan
+    normalized = deepcopy(plan)
+    changes = []
+
+    def visit(node, path, parent_axis=None):
+        if not isinstance(node, dict):
+            return
+        if parent_axis == "row" and node.get("slot") == "bottom" and node.get("cross_align") == "end":
+            del node["slot"]
+            changes.append({"path": path + "/slot", "op": "remove", "original": "bottom",
+                            "reason": "row_bottom_slot_with_explicit_cross_align_end"})
+        children = node.get("children")
+        if isinstance(children, list):
+            for index, child in enumerate(children):
+                visit(child, f"{path}/children/{index}", node.get("axis"))
+
+    visit(normalized.get("region_tree"), "/region_tree")
+    if not changes:
+        return plan
+    trace_event("architect.region_plan_normalized", raw_plan=plan, normalized_plan=normalized, changeset=changes)
+    return normalized
 
 
 def speech_segments(speech):
@@ -22,6 +49,7 @@ def compile_region_tree(plan, segments, *, schema_version=1):
         import json
         from src.schemas.region_plan import RegionPlan
         from src.utils.region_diagnostics import region_diagnostics
+        plan = normalize_region_plan(plan)
         diagnostics = region_diagnostics(plan, segments)
         execution_errors = [issue for issue in diagnostics if not issue["path"].startswith("/requirements/")]
         if execution_errors:

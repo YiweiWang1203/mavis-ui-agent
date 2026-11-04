@@ -8,7 +8,7 @@ from pydantic import Field, create_model
 from src.schemas.region_plan import Contract, Region
 from src.service.main_model_runtime import main_client, note_rejected_architect_repair
 from src.utils.pipeline_trace import trace_event
-from src.utils.region_tree import compile_region_tree
+from src.utils.region_tree import compile_region_tree, normalize_region_plan
 from src.utils.region_audit_input import observation_content, audit_plan_view, plan_references, resolve_pointer
 from src.utils.region_diagnostics import region_diagnostics
 
@@ -215,6 +215,7 @@ def audit_region_plan(candidate, segments, vision, original_intent, model, stage
 
 def review_region_plan(plan, segments, vision, original_intent, model, planner_prompt, planner_content):
     shadow = os.getenv("UI_REGION_AUDIT_POLICY") == "shadow"
+    plan = normalize_region_plan(plan)
 
     def audit_with_status(candidate, stage):
         try:
@@ -238,6 +239,7 @@ def review_region_plan(plan, segments, vision, original_intent, model, planner_p
             repaired = repair_region_plan(plan, structural_errors, model, planner_prompt, planner_content,
                                           review=None if shadow else first, segments=segments)
             trace_event("architect.repair_parsed", output=repaired, previous=plan)
+            repaired = normalize_region_plan(repaired)
             result = compile_region_tree(repaired, segments, schema_version=2)
         except ValueError as error:
             selection.update(repair_rejected=True, diagnostic=str(error))

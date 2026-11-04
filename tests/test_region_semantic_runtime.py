@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 from src.agents.region_review import audit_region_plan, review_region_plan
 from src.service.main_model_runtime import MainModelRuntime, MODEL
+from src.utils.pipeline_trace import PipelineTrace
+from src.utils.region_tree import compile_region_tree
 
 
 PLAN = {
@@ -37,6 +39,43 @@ class SemanticRuntimeTests(unittest.TestCase):
         output, slots = self.exercise("broken JSON", [PASS, PLAN, PASS])
         self.assertEqual(slots[-3:], ["semantic_audit", "architect_repair", "semantic_reaudit"])
         self.assertEqual(output["elements"][0]["items"], PLAN["elements"][0]["items"])
+
+    def test_row_bottom_alias_is_opt_in_and_auditable(self):
+        plan = deepcopy(PLAN)
+        plan["region_tree"]["children"] = [
+            {"id": "controls", "axis": "row", "slot": "bottom", "children": [
+                {"id": "item", "slot": "bottom", "cross_align": "end", "grow": True}]}]
+        original = deepcopy(plan)
+        with patch.dict("os.environ", {"UI_REGION_PLAN_NORMALIZATION": ""}):
+            with self.assertRaisesRegex(ValueError, "/children/0/children/0/slot"):
+                compile_region_tree(plan, {}, schema_version=2)
+
+        expected = deepcopy(plan)
+        del expected["region_tree"]["children"][0]["children"][0]["slot"]
+        with patch.dict("os.environ", {"UI_REGION_PLAN_NORMALIZATION": "row_bottom_alias_v1"}):
+            with tempfile.TemporaryDirectory() as directory:
+                trace = Path(directory) / "trace"
+                with PipelineTrace(trace):
+                    output = compile_region_tree(plan, {}, schema_version=2)
+                event, = trace.glob("*region_plan_normalized.json")
+                evidence = json.loads(event.read_text(encoding="utf-8"))
+            self.assertEqual(evidence["raw_plan"], original)
+            self.assertEqual(evidence["normalized_plan"], expected)
+            self.assertEqual(evidence["changeset"], [{
+                "path": "/region_tree/children/0/children/0/slot", "op": "remove", "original": "bottom",
+                "reason": "row_bottom_slot_with_explicit_cross_align_end"}])
+            self.assertEqual(output, compile_region_tree(expected, {}, schema_version=2))
+            self.assertEqual(output["region_tree"]["children"][0]["slot"], "bottom")
+            audited, slots = self.exercise(plan, [PASS])
+            self.assertEqual(audited["region_tree"], output["region_tree"])
+            self.assertEqual(slots[-1], "semantic_audit")
+            for align in (None, "start", "center", "stretch"):
+                with self.subTest(align=align):
+                    conflict = deepcopy(plan)
+                    conflict["region_tree"]["children"][0]["children"][0]["cross_align"] = align
+                    with self.assertRaisesRegex(ValueError, "/children/0/children/0/slot"):
+                        compile_region_tree(conflict, {}, schema_version=2)
+        self.assertEqual(plan, original)
 
     @patch.dict("os.environ", {"UI_REGION_REPAIR_MODE": "local_subtree",
                                "UI_REGION_AUDIT_POLICY": "repair_on_revise"})
