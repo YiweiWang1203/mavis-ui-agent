@@ -43,3 +43,20 @@ def test_actual_planner_requests_separate_source_geometry(monkeypatch):
     assert {"object_id": "inside", "relation": "left_of", "other_id": "right"} in payload["spatial_observations"]
     assert '"bbox"' not in content and '"raw"' not in content
     assert vision == original
+
+
+def test_relative_observation_handles_optional_lists_and_rejects_invalid_identity():
+    import pytest
+    from src.service.planner_observation import relative_vision_observations
+
+    source = {"elements": [{"id": "e1", "children_ids": None},
+                           {"id": "e2", "children_ids": "e1"}], "reading_order": None}
+    before = copy.deepcopy(source)
+    result = relative_vision_observations(source)
+    assert result["observed_reading_order"] == []
+    assert all(e["observed_children_ids"] == [] for e in result["elements"])
+    assert source == before
+    for elements, error in [([{}, {"id": "e1"}], "nonempty"),
+                            ([{"id": "e1"}, {"id": "e1"}], "Duplicate")]:
+        with pytest.raises(ValueError, match=error):
+            relative_vision_observations({"elements": elements})

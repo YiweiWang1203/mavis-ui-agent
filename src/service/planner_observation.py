@@ -2,9 +2,20 @@
 import math
 
 
+def _list(value):
+    return value if isinstance(value, list) else []
+
+
 def relative_vision_observations(vision):
     elements = vision.get("elements", [])
-    ids = {e["id"] for e in elements}
+    ids = set()
+    for element in elements:
+        element_id = element.get("id") if isinstance(element, dict) else None
+        if not isinstance(element_id, str) or not element_id.strip():
+            raise ValueError("Planner observation requires a nonempty object ID")
+        if element_id in ids:
+            raise ValueError("Duplicate object ID in planner observation: " + element_id)
+        ids.add(element_id)
     objects = []
     boxes = {}
     for element in elements:
@@ -13,7 +24,7 @@ def relative_vision_observations(vision):
                if key in element}
         parent = element.get("parent_id")
         row["observed_parent_id"] = parent if isinstance(parent, str) and parent in ids and parent != element_id else None
-        row["observed_children_ids"] = [child for child in element.get("children_ids", [])
+        row["observed_children_ids"] = [child for child in _list(element.get("children_ids"))
                                         if isinstance(child, str) and child in ids and child != element_id]
         objects.append(row)
         raw = element.get("bbox")
@@ -45,7 +56,7 @@ def relative_vision_observations(vision):
                 relations.append({"object_id": source, "relation": relation, "other_id": ranked[0][1]})
     return {
         "elements": objects,
-        "observed_reading_order": [item for item in vision.get("reading_order", []) if item in ids],
+        "observed_reading_order": [item for item in _list(vision.get("reading_order")) if isinstance(item, str) and item in ids],
         "spatial_observations": relations,
         "interpretation": "Geometry relations describe only the source observation. Geometric containment does not establish a parent. Missing or ambiguous relations are unknown. Use the target viewport in User Intent to plan placement."
     }
