@@ -112,7 +112,8 @@ def is_complete_html_document(code: str) -> bool:
 
 def generate_region_bundle(state, original_request, transcript):
     from src.renderers.region_bundle import (
-        Bundle, CONTENT_TAGS, LEAF_TAGS, authored_attribute_rules, layout_style_targets, render_region_bundle,
+        Bundle, CONTENT_TAGS, LEAF_TAGS, authored_asset_rules, authored_attribute_rules,
+        layout_style_targets, render_region_bundle,
         repeated_content_identities,
     )
     from src.utils.coder_execution_input import coder_execution_state
@@ -131,6 +132,7 @@ def generate_region_bundle(state, original_request, transcript):
               + "\nAllowed leaf root tags: " + ", ".join(sorted(LEAF_TAGS))
               + "\nAllowed fragment tags: " + ", ".join(sorted(CONTENT_TAGS))
               + "\n" + authored_attribute_rules()
+              + "\n" + authored_asset_rules()
               + "\nJSON schema: " + json.dumps(Bundle.model_json_schema()))
     style_targets = layout_style_targets(execution["region_tree"])
     item_identities = repeated_content_identities(execution.get("elements", []), style_targets)

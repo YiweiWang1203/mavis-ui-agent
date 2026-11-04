@@ -27,6 +27,24 @@ SIMPLE_NAME = r"[A-Za-z_-][A-Za-z0-9_-]*"
 RESERVED_ATTRIBUTE_PREFIXES = ("data-ui-", "on")
 FORBIDDEN_ATTRIBUTES = ("is", "srcdoc")
 LEAF_ROOT_RESERVED_ATTRIBUTES = ("id", "style")
+MAX_INLINE_SVG_BYTES = 2048
+OPAQUE_ASSET = re.compile(r"(?<![\w-])data:|;base64\s*,|[A-Za-z0-9+/_=-]{1024,}", re.I)
+
+
+def authored_asset_rules():
+    return (
+        "Asset rules (compact_asset_contract_v1) apply to authored HTML, CSS and JS. "
+        "Use only short references supplied by the program for trusted catalog assets. "
+        "If none are supplied, use simple CSS shapes or compact inline SVG for avatars and icons. "
+        f"Put SVG markup in component or panel HTML only, at most {MAX_INLINE_SVG_BYTES} UTF-8 bytes "
+        "per complete <svg> fragment including tags. Use a div or figure with image semantics for an SVG image leaf. "
+        "Never emit data: URLs, base64 assets, or other large opaque encoded asset payloads."
+    )
+
+
+def check_asset_text(value, scope):
+    if value and OPAQUE_ASSET.search(value):
+        raise ValueError(f"REGION_BUNDLE_OPAQUE_ASSET: {scope}")
 
 
 def authored_attribute_rules():
@@ -195,6 +213,7 @@ def validate_attrs(attrs, owner, ids, *, root=False):
                 or (root and name in LEAF_ROOT_RESERVED_ATTRIBUTES)):
             raise ValueError(f"REGION_BUNDLE_ATTRIBUTE: {owner}: {name}")
         seen.add(name)
+        check_asset_text(value, owner)
         if name == "id":
             prefix = content_id_prefix(owner)
             if (not value or not value.startswith(prefix) or len(value) == len(prefix)
@@ -204,10 +223,21 @@ def validate_attrs(attrs, owner, ids, *, root=False):
 
 
 class Fragment(HTMLParser):
-    def __init__(self, owner, ids, root):
+    def __init__(self, owner, ids, root, inner):
         super().__init__(convert_charrefs=False)
         self.owner, self.ids = owner, ids
         self.stack = [root]
+        self.inner = inner
+        self.line_offsets = [0, *(match.end() for match in re.finditer("\n", inner))]
+        self.svg_offsets = []
+
+    def source_index(self):
+        line, column = self.getpos()
+        return self.line_offsets[line - 1] + column
+
+    def check_svg_size(self, start, end):
+        if len(self.inner[start:end].encode("utf-8")) > MAX_INLINE_SVG_BYTES:
+            raise ValueError(f"REGION_BUNDLE_SVG_SIZE: {self.owner}: maximum {MAX_INLINE_SVG_BYTES} UTF-8 bytes")
 
     def start(self, tag, attrs, self_closing=False):
         svg = "svg" in self.stack
@@ -221,6 +251,12 @@ class Fragment(HTMLParser):
                 or (self_closing and tag not in VOID_TAGS and not (svg or tag == "svg"))):
             raise ValueError(f"REGION_BUNDLE_TAG: {self.owner}: {tag}")
         validate_attrs(attrs, self.owner, self.ids)
+        if tag == "svg":
+            offset = self.source_index()
+            if self_closing:
+                self.check_svg_size(offset, offset + len(self.get_starttag_text()))
+            else:
+                self.svg_offsets.append(offset)
         if tag not in VOID_TAGS and not self_closing:
             self.stack.append(tag)
 
@@ -233,6 +269,9 @@ class Fragment(HTMLParser):
     def handle_endtag(self, tag):
         if len(self.stack) == 1 or self.stack.pop() != tag:
             raise ValueError(f"REGION_BUNDLE_UNBALANCED: {self.owner}: {tag}")
+        if tag == "svg":
+            end = self.inner.index(">", self.source_index()) + 1
+            self.check_svg_size(self.svg_offsets.pop(), end)
 
     def handle_decl(self, decl):
         raise ValueError(f"REGION_BUNDLE_DECLARATION: {self.owner}")
@@ -276,7 +315,7 @@ def render_region_bundle(raw, tree):
         ids.add(panel.id)
 
     def check_inner(owner, tag, inner):
-        parser = Fragment(owner, ids, tag)
+        parser = Fragment(owner, ids, tag, inner)
         parser.feed(inner)
         parser.close()
         if len(parser.stack) != 1:
@@ -306,6 +345,10 @@ def render_region_bundle(raw, tree):
         body += f'<div id="{panel.id}">{panel.inner}</div>'
     if re.search(r"</?style\b", bundle.css, re.I) or re.search(r"</?script\b|<!--", bundle.js, re.I):
         raise ValueError("REGION_BUNDLE_RAW_TEXT_BOUNDARY")
+    for scope, value in (("css", bundle.css), ("js", bundle.js)):
+        check_asset_text(value, scope)
+        if re.search(r"<svg\b", value, re.I):
+            raise ValueError(f"REGION_BUNDLE_SVG_LOCATION: {scope}")
     code = ('<!doctype html>\n<html><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<style>body{margin:0}[data-ui-id]{min-width:0;min-height:0}\n'

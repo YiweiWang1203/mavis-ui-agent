@@ -7,7 +7,10 @@ import unittest
 from unittest.mock import patch
 
 from src.agents.coder import generate_frontend_code
-from src.renderers.region_bundle import RENDERER, layout_style_targets, render_region_bundle, repeated_content_identities
+from src.renderers.region_bundle import (
+    MAX_INLINE_SVG_BYTES, RENDERER, authored_asset_rules, layout_style_targets, render_region_bundle,
+    repeated_content_identities,
+)
 from src.service.main_model_runtime import MODEL, MainModelRuntime
 
 
@@ -127,6 +130,43 @@ class RegionBundleTests(unittest.TestCase):
             with self.subTest(scope=scope), self.assertRaisesRegex(ValueError, "REGION_BUNDLE_ATTRIBUTE: .*: onclick"):
                 self.render(bundle)
 
+    def test_compact_asset_representations(self):
+        bundle = deepcopy(BUNDLE)
+        bundle["components"][4]["attrs"]["disabled"] = ""
+        bundle["components"][4]["inner"] = "<option selected>One</option>"
+        bundle["components"][2]["attrs"]["src"] = "/assets/catalog/avatar.svg"
+        icon = bundle["components"][-1]
+        icon["attrs"] = {"role": "img", "aria-label": "Icon"}
+        icon["inner"] = "<svg>\n<desc></desc></svg>"
+        spaces = MAX_INLINE_SVG_BYTES - len(icon["inner"].encode("utf-8"))
+        icon["inner"] = icon["inner"].replace("</desc>", ("图" * (spaces // 3)) + " " * (spaces % 3) + "</desc>")
+        html, report = self.render(bundle)
+        self.assertTrue(report["passed"])
+        self.assertIn('src="/assets/catalog/avatar.svg"', html)
+        self.assertIn(icon["inner"], html)
+        icon["inner"] = icon["inner"].replace("</desc>", "图</desc>")
+        with self.assertRaisesRegex(ValueError, "REGION_BUNDLE_SVG_SIZE"):
+            self.render(bundle)
+
+    def test_opaque_assets_rejected_across_authored_fields(self):
+        cases = [
+            ("root", "DaTa:image/svg+xml;base64,PHN2Zz4="),
+            ("panel", '<img src="data&#58;image/svg+xml,opaque">'),
+            ("css", '.icon{background:url("data:image/png,opaque")}'),
+            ("js", 'image.src = "data:image/png,opaque"'),
+            ("js", 'const imageBytes = "' + 'A' * 1024 + '"'),
+        ]
+        for scope, value in cases:
+            bundle = deepcopy(BUNDLE)
+            if scope == "root":
+                bundle["components"][2]["attrs"]["src"] = value
+            elif scope == "panel":
+                bundle["panels"][0]["inner"] = value
+            else:
+                bundle[scope] = value
+            with self.subTest(scope=scope), self.assertRaisesRegex(ValueError, "REGION_BUNDLE_OPAQUE_ASSET"):
+                self.render(bundle)
+
     def test_repeated_identity_reserves_layout_ids_and_distinguishes_nested_source_items(self):
         elements = [{"id": "results", "items": [{"id": "source", "items": [{"id": "source"}]}, {}]}]
         self.assertEqual(repeated_content_identities(elements, {"results", "results--item-1"}), {"results": [
@@ -156,20 +196,21 @@ class RegionBundleTests(unittest.TestCase):
                             '<input id="results--item-1" aria-labelledby="results--name">')
         valid["css"] += " #results--item-1{color:red}"
         valid["js"] += 'document.getElementById("results--item-1").addEventListener("change",()=>{});'
-        for success in (True, False):
-            with self.subTest(success=success), tempfile.TemporaryDirectory() as directory:
+        for status in ("valid", "invalid", "length"):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                raw = json.dumps(valid if success else BUNDLE | {"components": []})
+                raw = json.dumps(valid if status == "valid" else BUNDLE | {"components": []})
+                reasons = iter(["stop"] * 3 + ["length" if status == "length" else "stop"])
 
                 def dispatch(request, **kwargs):
                     return {"ok": True, "response": {"choices": [
-                        {"finish_reason": "stop", "message": {"content": raw}}]}}
+                        {"finish_reason": next(reasons), "message": {"content": raw}}]}}
 
                 with MainModelRuntime(root / "requests", dispatch, profile="semantic7") as runtime:
                     for stage in ("vision", "architect", "semantic_audit"):
                         runtime.create(stage, model=MODEL)
                     with patch("src.agents.coder.HTML_OUTPUT_DIR", root / "html"):
-                        if success:
+                        if status == "valid":
                             output = generate_frontend_code(state)
                             self.assertEqual(output["renderer"], RENDERER)
                             html = Path(output["file_path"]).read_text(encoding="utf-8")
@@ -177,10 +218,18 @@ class RegionBundleTests(unittest.TestCase):
                             self.assertIn(results["inner"], html)
                             self.assertIn(valid["css"], html)
                             self.assertIn(valid["js"], html)
-                        else:
+                        elif status == "invalid":
                             with self.assertRaisesRegex(ValueError, "LEAF_COVERAGE"):
                                 generate_frontend_code(state)
                             self.assertFalse((root / "html").exists())
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, "INCOMPLETE_MODEL_RESPONSE"):
+                                generate_frontend_code(state)
+                            self.assertFalse((root / "html").exists())
+                            terminal = json.loads((root / "requests/coder_terminal.json").read_text(encoding="utf-8"))
+                            self.assertEqual(terminal["status"], "FAILED_NO_RETRY")
+                            self.assertEqual(terminal["dispatch_attempts"], 1)
+                            self.assertEqual(terminal["automatic_retries"], 0)
                 request = json.loads((root / "requests/coder_request.json").read_text(encoding="utf-8"))
                 self.assertEqual(request["response_format"], {"type": "json_object"})
                 user = json.loads(request["messages"][1]["content"])
@@ -190,6 +239,8 @@ class RegionBundleTests(unittest.TestCase):
                     {"item_path": [0], "source_item_id": "results_1", "dom_id": "results--item-1"},
                 ]})
                 system = request["messages"][0]["content"]
+                self.assertIn(authored_asset_rules(), system)
+                self.assertIn('role="img" and an accessible name', system)
                 self.assertIn("It has no class", system)
                 self.assertIn("leaf roots (attrs), component descendants (inner), "
                               "and panel descendants (panels[].inner): no data-ui-*, on* attributes", system)
