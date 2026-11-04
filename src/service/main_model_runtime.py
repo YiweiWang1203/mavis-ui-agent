@@ -16,6 +16,8 @@ SEMANTIC_LAYOUT_UPSTREAM_PROFILE = "single_semantic_layout_upstream2"
 SEMANTIC_LAYOUT_ARM_PROFILES = {
     "control": "single_semantic_layout_control2", "candidate": "single_semantic_layout_candidate2",
 }
+MEMBERSHIP_RECOVERY_CONTROL = "semantic_membership_recovery_control1"
+MEMBERSHIP_RECOVERY_CANDIDATE = "semantic_membership_recovery_candidate2"
 
 
 def main_client(stage):
@@ -34,6 +36,16 @@ def architect_review_enabled():
 def semantic_layout_enabled():
     runtime = ACTIVE.get()
     return runtime is not None and runtime.profile == SEMANTIC_LAYOUT_ARM_PROFILES["candidate"]
+
+
+def semantic_membership_enabled():
+    runtime = ACTIVE.get()
+    return runtime is not None and runtime.profile == MEMBERSHIP_RECOVERY_CANDIDATE
+
+
+def bounded_svg_uri_enabled():
+    runtime = ACTIVE.get()
+    return runtime is not None and runtime.profile in {MEMBERSHIP_RECOVERY_CONTROL, MEMBERSHIP_RECOVERY_CANDIDATE}
 
 
 def note_rejected_architect_repair(diagnostic):
@@ -61,7 +73,8 @@ class MainModelRuntime:
                   "source_relation_extract1": 1, "source_relation_arm2": 2,
                   SOURCE_BINDING_UPSTREAM_PROFILE: 4, SOURCE_BINDING_ARM_PROFILE: 2,
                   SOURCE_BINDING_RECOVERY_PROFILE: 1, SEMANTIC_LAYOUT_UPSTREAM_PROFILE: 2,
-                  **dict.fromkeys(SEMANTIC_LAYOUT_ARM_PROFILES.values(), 2)}
+                  **dict.fromkeys(SEMANTIC_LAYOUT_ARM_PROFILES.values(), 2),
+                  MEMBERSHIP_RECOVERY_CONTROL: 1, MEMBERSHIP_RECOVERY_CANDIDATE: 2}
         if profile not in limits:
             raise ValueError("UNKNOWN_RUNTIME_PROFILE")
         self.profile = profile
@@ -101,7 +114,7 @@ class MainModelRuntime:
                     'coder' if self.used[-1] == 'architect' else 'architect')
         if self.profile == "audit1":
             allowed = {"semantic_audit"}
-        elif self.profile == "repair_probe_control1":
+        elif self.profile in {"repair_probe_control1", MEMBERSHIP_RECOVERY_CONTROL}:
             allowed = {"coder"}
         elif self.profile == "repair_probe_feedback2":
             allowed = {"coder"} if self.used else {"architect_repair"}
@@ -109,7 +122,8 @@ class MainModelRuntime:
             allowed = {"source_relation_extract"}
         elif self.profile == SOURCE_BINDING_RECOVERY_PROFILE:
             allowed = {"source_relation_bind"}
-        elif self.profile in {"source_relation_arm2", SOURCE_BINDING_ARM_PROFILE, *SEMANTIC_LAYOUT_ARM_PROFILES.values()}:
+        elif self.profile in {"source_relation_arm2", SOURCE_BINDING_ARM_PROFILE, MEMBERSHIP_RECOVERY_CANDIDATE,
+                              *SEMANTIC_LAYOUT_ARM_PROFILES.values()}:
             allowed = {"coder"} if self.used else {"architect"}
         elif self.profile == SEMANTIC_LAYOUT_UPSTREAM_PROFILE:
             allowed = {"vision"} if not self.used or (

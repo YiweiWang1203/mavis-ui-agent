@@ -518,6 +518,9 @@ def ui_architect_node(state: State) -> Command[Literal["supervisor"]]:
     combined_intent = original_prompt
     source_evidence = ({"source_relation_evidence": state["source_relation_evidence"]}
                        if "source_relation_evidence" in state else {})
+    from src.service.main_model_runtime import semantic_membership_enabled
+    if semantic_membership_enabled():
+        source_evidence["original_request_source"] = state.get("original_user_request") or ""
     result_json = generate_ui_state(combined_intent, vision_elements, preferred_locale=state.get("preferred_locale"),
                                     asr_transcript=state.get("asr_transcript") or "", **source_evidence)
 

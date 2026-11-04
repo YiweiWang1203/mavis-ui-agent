@@ -36,6 +36,33 @@ class SemanticLayout(Contract):
     relations: list[Relation]
 
 
+class MemberFrame(Frame):
+    parent: str | None
+    membership_source_id: str = "inferred"
+
+
+class MemberElement(Element):
+    parent: str
+    membership_source_id: str = "inferred"
+
+
+class LocalRelation(Relation):
+    kind: Literal[
+        "same_group", "left_of", "right_of", "above", "below",
+        "at_left", "at_right", "at_top", "at_bottom", "bottom_left", "bottom_right",
+        "center_across", "fill_along",
+    ]
+
+
+class SemanticMembershipLayout(Contract):
+    page_meta: PageMeta
+    elements: list[MemberElement] = Field(min_length=1)
+    content_requirements: list[Requirement]
+    actions: list[Action]
+    frames: list[MemberFrame] = Field(min_length=1)
+    relations: list[LocalRelation]
+
+
 DIRECTIONS = {
     "left_of": ("horizontal", False), "right_of": ("horizontal", True),
     "above": ("vertical", False), "below": ("vertical", True),
@@ -48,7 +75,27 @@ EDGES = {
 }
 
 
-def compile_semantic_layout(raw, segments, request):
+def compile_semantic_membership(raw, segments, request):
+    plan = SemanticMembershipLayout.model_validate(raw)
+    nodes = [*plan.frames, *plan.elements]
+    if any((node.parent is None) != (node.id == "page") for node in nodes):
+        raise ValueError("SEMANTIC_MEMBERSHIP_INVALID_ROOT_PARENT")
+    if any(row.id.startswith("membership:") for row in plan.relations):
+        raise ValueError("SEMANTIC_MEMBERSHIP_RESERVED_RELATION_ID")
+    # Lower explicit node parents to the shared compiler's internal edge representation.
+    lowered = plan.model_dump()
+    for field in ("frames", "elements"):
+        for node in lowered[field]:
+            del node["parent"], node["membership_source_id"]
+    lowered["relations"] = [
+        {"id": f"membership:{node.id}", "source_id": node.membership_source_id,
+         "subject": node.id, "frame": node.parent, "kind": "inside"}
+        for node in nodes if node.parent is not None
+    ] + lowered["relations"]
+    return compile_semantic_layout(lowered, segments, request, derive_source_evidence=True)
+
+
+def compile_semantic_layout(raw, segments, request, *, derive_source_evidence=False):
     plan = SemanticLayout.model_validate(raw)
     frames = {frame.id: frame.flow for frame in plan.frames}
     elements = {element.id for element in plan.elements}
@@ -63,6 +110,7 @@ def compile_semantic_layout(raw, segments, request):
     members = {key: set() for key in frames}
     parents = {}
     relation_ids = set()
+    evidence = {}
     for row in plan.relations:
         require(row.id and row.id not in relation_ids, "RELATION_ID", row.id)
         relation_ids.add(row.id)
@@ -70,6 +118,13 @@ def compile_semantic_layout(raw, segments, request):
         source = request if row.source_id == "request" else segments.get(row.source_id, {}).get("text")
         if row.source_id in {"vision", "inferred"}:
             require(row.quote is None, "SOURCE_QUOTE", row.id)
+        elif derive_source_evidence:
+            require(source is not None and (row.quote is None or
+                    (row.quote.strip() and row.quote in source)), "SOURCE_QUOTE", row.id)
+            evidence[row.id] = (
+                {"text": request, "start": 0, "end": len(request)}
+                if row.source_id == "request" else dict(segments[row.source_id])
+            )
         else:
             require(source is not None and row.quote and row.quote.strip() and row.quote in source,
                     "SOURCE_QUOTE", row.id)
@@ -158,7 +213,7 @@ def compile_semantic_layout(raw, segments, request):
     for row in plan.relations:
         if row.source_id in segments:
             requirements.append({
-                "sources": [row.source_id], "intent": row.quote, "certainty": "explicit",
+                "sources": [row.source_id], "intent": row.quote or evidence[row.id]["text"], "certainty": "explicit",
                 "status": "bound", "scope": row.frame, "targets": [row.subject],
                 "references": [row.reference] if row.reference is not None else [],
             })
@@ -169,7 +224,9 @@ def compile_semantic_layout(raw, segments, request):
     }, segments, schema_version=2)
     provenance = {
         "frames": {key: {"flow": flow, "axis_path": paths[key] + "/axis"} for key, flow in frames.items()},
-        "relations": [{**row.model_dump(), "compiled_paths": [
+        "relations": [{**row.model_dump(),
+                       **({"source_evidence": evidence.get(row.id)} if derive_source_evidence else {}),
+                       "compiled_paths": [
             paths[node] + field for node, field in trace_fields[row.id]
         ]} for row in plan.relations],
     }
