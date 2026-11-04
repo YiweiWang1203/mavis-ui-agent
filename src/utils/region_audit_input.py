@@ -2,29 +2,32 @@
 import re
 
 
-CONTENT_FIELDS = {
-    "id", "type", "text", "label", "description", "items", "elements",
-    "source", "confidence", "visible", "items_source", "parent_id",
-}
-
-
 def observation_content(value):
     if isinstance(value, list):
         return [observation_content(item) for item in value]
     if isinstance(value, dict):
         return {key: observation_content(item) for key, item in value.items()
-                if key in CONTENT_FIELDS}
+                if not is_geometry_metadata(key, item)}
     return value
 
 
+def is_geometry_metadata(key, value):
+    if key in {"bbox", "pixel_bbox"}:
+        return ((isinstance(value, list) and len(value) == 4
+                 and all(isinstance(number, (int, float)) for number in value))
+                or (isinstance(value, dict) and
+                    ({"x_min", "y_min", "x_max", "y_max"} <= value.keys()
+                     or {"x", "y", "width", "height"} <= value.keys())))
+    if key == "canvas":
+        return isinstance(value, dict) and {"width", "height"} <= value.keys()
+    if key == "coordinate_mapping":
+        return isinstance(value, dict) and "source" in value and (
+            "scale" in value or "recognition_size" in value)
+    return False
+
+
 def audit_plan_view(plan):
-    if isinstance(plan, list):
-        return [audit_plan_view(item) for item in plan]
-    if isinstance(plan, dict):
-        geometry = {"bbox", "pixel_bbox", "spatial_info", "canvas", "coordinate_mapping",
-                    "x_min", "x_max", "y_min", "y_max"}
-        return {key: audit_plan_view(value) for key, value in plan.items() if key not in geometry}
-    return plan
+    return observation_content(plan)
 
 
 def resolve_pointer(document, pointer):

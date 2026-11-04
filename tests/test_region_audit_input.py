@@ -5,9 +5,9 @@ from src.utils.region_diagnostics import region_diagnostics
 
 class AuditInputTests(unittest.TestCase):
     def test_nested_geometry_removed_without_mutating_original(self):
-        original = {"elements": [{"id": "list", "bbox": {"x_min": .36},
-                    "items": [{"id": "row", "text": "entry", "bbox": {"x_min": .08}}],
-                    "items_source": {"source": "vision_response", "canvas": {"width": 400}}}]}
+        original = {"elements": [{"id": "list", "bbox": {"x_min": .36, "y_min": .1, "x_max": .6, "y_max": .9},
+                    "items": [{"id": "row", "text": "entry", "bbox": [0.08, .1, .2, .3]}],
+                    "items_source": {"source": "vision_response", "canvas": {"width": 400, "height": 700}}}]}
         projected = observation_content(original)
         self.assertNotIn("bbox", str(projected))
         self.assertNotIn("canvas", str(projected))
@@ -15,6 +15,13 @@ class AuditInputTests(unittest.TestCase):
         self.assertIn("bbox", original["elements"][0])
         plan_view = audit_plan_view(original)
         self.assertNotIn("bbox", plan_view["elements"][0]["items"][0])
+
+    def test_business_fields_survive_both_views(self):
+        item = {"id": "row", "title": "Case", "content": "Message",
+                "value": 17, "role": "user", "x_min": "business label",
+                "bbox": "a business term", "canvas": "fabric"}
+        for project in (observation_content, audit_plan_view):
+            self.assertEqual(project({"items": [item]}), {"items": [item]})
 
     def test_pointer_paths_and_missing_parent_location(self):
         plan = {"region_tree": {"children": []}, "a/b": {"~key": 3}}
