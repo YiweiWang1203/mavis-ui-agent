@@ -35,7 +35,8 @@ def note_vision_repair(feedback):
 
 class MainModelRuntime:
     def __init__(self, output, dispatch=None, *, profile="baseline4"):
-        limits = {"baseline4": 4, "semantic7": 7, "audit1": 1}
+        limits = {"baseline4": 4, "semantic7": 7, "audit1": 1,
+                  "repair_probe_control1": 1, "repair_probe_feedback2": 2}
         if profile not in limits:
             raise ValueError("UNKNOWN_RUNTIME_PROFILE")
         self.profile = profile
@@ -73,6 +74,10 @@ class MainModelRuntime:
                     'coder' if self.used[-1] == 'architect' else 'architect')
         if self.profile == "audit1":
             allowed = {"semantic_audit"}
+        elif self.profile == "repair_probe_control1":
+            allowed = {"coder"}
+        elif self.profile == "repair_probe_feedback2":
+            allowed = {"coder"} if self.used else {"architect_repair"}
         elif self.profile == "semantic7" and self.used:
             successors = {
                 "architect": {"semantic_audit"},

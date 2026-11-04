@@ -43,6 +43,20 @@ def request_region_review(model, stage, system, payload, original_content=None):
         temperature=0, response_format={"type": "json_object"})
     return json.loads(response.choices[0].message.content)
 
+
+def repair_region_plan(plan, structural_errors, model, planner_prompt, planner_content, *, review=None):
+    payload = {
+        "previous_plan": plan,
+        "structural_errors": structural_errors,
+        "instruction": "Correct only the listed hard execution violations. Preserve unrelated decisions."
+        if review is None else "Correct the supported issues and return the complete plan under the same schema.",
+    }
+    if review is not None:
+        payload["review"] = review
+    return request_region_review(model, "architect_repair", planner_prompt, payload,
+                                 original_content=planner_content)
+
+
 def audit_region_plan(candidate, segments, vision, original_intent, model, stage):
     shadow = os.getenv("UI_REGION_AUDIT_POLICY") == "shadow"
     plan_view = audit_plan_view(candidate)
@@ -138,16 +152,8 @@ def review_region_plan(plan, segments, vision, original_intent, model, planner_p
     selection = {"selected": "initial"}
     if structural_errors or (not shadow and first["verdict"] == "revise"):
         try:
-            repair_input = {
-                "previous_plan": plan,
-                "structural_errors": structural_errors,
-                "instruction": "Correct only the listed hard execution violations. Preserve unrelated decisions."
-                if shadow else "Correct the supported issues and return the complete plan under the same schema.",
-            }
-            if not shadow:
-                repair_input["review"] = first
-            repaired = request_region_review(model, "architect_repair", planner_prompt, repair_input,
-                original_content=planner_content)
+            repaired = repair_region_plan(plan, structural_errors, model, planner_prompt, planner_content,
+                                          review=None if shadow else first)
             trace_event("architect.repair_parsed", output=repaired, previous=plan)
             result = compile_region_tree(repaired, segments, schema_version=2)
         except ValueError as error:
