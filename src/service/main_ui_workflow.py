@@ -71,7 +71,7 @@ def wrap_main_node(output, name, fn):
     return invoke
 
 
-def build_main_ui_graph(output, *, start_at_architect=False):
+def build_main_ui_graph(output, *, start_at_architect=False, start_at_coder=False):
     from langgraph.graph import START, END, StateGraph
     from src.graph import nodes
     from src.utils.pipeline_trace import state_summary
@@ -108,7 +108,9 @@ def build_main_ui_graph(output, *, start_at_architect=False):
     graph.add_node('architect', wrap_main_node(output, 'architect', nodes.ui_architect_node))
     graph.add_node('coder', wrap_main_node(output, 'coder', nodes.code_node))
     graph.add_node('review', review)
-    if start_at_architect:
+    if start_at_coder:
+        graph.add_edge(START, 'coder')
+    elif start_at_architect:
         graph.add_edge(START, 'architect')
     else:
         graph.add_node('vision', wrap_main_node(output, 'vision', nodes.vision_node))
@@ -189,7 +191,7 @@ def run_semantic_layout_pair(state, output, run_id, dispatch=None):
     return result
 
 
-def run_planner_arm(inputs, folder, run_id, profile, dispatch, *, trace_label):
+def run_planner_arm(inputs, folder, run_id, profile, dispatch, *, trace_label, start_at_coder=False):
     from src.service.main_model_runtime import MainModelRuntime
     from src.utils.pipeline_trace import trace_event
 
@@ -201,7 +203,7 @@ def run_planner_arm(inputs, folder, run_id, profile, dispatch, *, trace_label):
         os.environ['MAVIS_MAIN_RUN_ID'] = run_id + '_' + folder.name
         trace_event(trace_label, arm=folder.name)
         with MainModelRuntime(folder / 'requests', dispatch, profile=profile) as runtime:
-            final = build_main_ui_graph(folder, start_at_architect=True).invoke(inputs)
+            final = build_main_ui_graph(folder, start_at_architect=True, start_at_coder=start_at_coder).invoke(inputs)
             save(folder / 'final_state.json', final)
         arm.update(model_calls=list(runtime.used), failed_node=final.get('failed_node'), review=final.get('review'))
         if (final.get('review') or {}).get('html_persisted'):
