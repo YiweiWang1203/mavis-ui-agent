@@ -221,7 +221,7 @@ def run_planner_arm(inputs, folder, run_id, profile, dispatch, *, trace_label, s
 
 def run_main_video(*, video_path, user_prompt, output_dir, run_id,
                    rotate_degrees=180, image_path=None, preferred_locale='auto', region_v2_no_review=False,
-                   source_binding_pair=False, single_semantic_layout_pair=False):
+                   source_binding_pair=False, single_semantic_layout_pair=False, direct_multimodal_baseline=False):
     config_path = ROOT / 'config/main_ui.json'
     config = json.loads(config_path.read_text(encoding='utf-8'))
     profile = config.get("runtime_profile", "baseline4")
@@ -233,8 +233,14 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
     if (config.get('max_physical_requests_per_case'), config.get('max_output_tokens'),
         config.get('timeout_seconds'), config.get('automatic_retries'), config.get('enable_asr')) != (request_limit, 8192, 600, 0, True):
         raise ValueError('UNSUPPORTED_MAIN_BUDGET_CONFIG')
-    if sum((region_v2_no_review, source_binding_pair, single_semantic_layout_pair)) > 1:
+    if sum((region_v2_no_review, source_binding_pair, single_semantic_layout_pair, direct_multimodal_baseline)) > 1:
         raise ValueError("CONFLICTING_MAIN_EXPERIMENTS")
+    if direct_multimodal_baseline:
+        if image_path is not None:
+            raise ValueError("DIRECT_BASELINE_REQUIRES_VIDEO_FRAME_WITHOUT_OVERRIDE")
+        from src.service.main_model_runtime import DIRECT_MULTIMODAL_PROFILE
+        profile = DIRECT_MULTIMODAL_PROFILE
+        config.update(runtime_profile=profile, max_physical_requests_per_case=1)
     pair_runner = None
     if region_v2_no_review or source_binding_pair or single_semantic_layout_pair:
         if profile != "semantic7" or config['environment'].get('UI_STRUCTURE_MODE') != "region_tree_v1":
@@ -282,7 +288,6 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
         from src.service.main_model_runtime import MainModelRuntime
         from src.utils.pipeline_trace import PipelineTrace
         from src.service.input_adapter import prepare_workflow_input
-        from langchain_core.messages import HumanMessage
         runtime_context = nullcontext() if pair_runner else MainModelRuntime(output / 'requests', profile=profile)
         with PipelineTrace(output / 'trace', terminal), runtime_context as runtime:
             prepared = prepare_workflow_input(text=user_prompt, video_path=video_path, image_path=image_path,
@@ -292,6 +297,11 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
             state = prepared['state']
             if preferred_locale != 'auto':
                 state['preferred_locale'] = preferred_locale
+            if direct_multimodal_baseline:
+                from src.service.direct_multimodal_baseline import run_direct_baseline
+                terminal.update(run_direct_baseline(prepared, output))
+                return terminal
+            from langchain_core.messages import HumanMessage
             state['messages'] = [HumanMessage(content=m['content']) for m in state['messages']]
             if pair_runner:
                 paired = pair_runner(state, output, run_id)

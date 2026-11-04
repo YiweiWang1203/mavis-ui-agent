@@ -145,6 +145,8 @@ def main() -> int:
                         help="Run the bounded source-binding pair with shared video preprocessing and Vision")
     parser.add_argument("--single-semantic-layout-pair", action="store_true",
                         help="Compare region v2 and compiled semantic layout with shared video input and Vision")
+    parser.add_argument("--direct-multimodal-baseline", action="store_true",
+                        help="Generate one HTML document directly from the selected video frame and transcript")
     parser.add_argument("--legacy-pipeline", action="store_true", help="Explicitly retain the historical unbounded diagnostic path")
     parser.add_argument(
         "--disable-layout-solver",
@@ -166,7 +168,8 @@ def main() -> int:
     parser.add_argument("--full-graph", action="store_true", help="Run the planner/supervisor LangGraph instead of the deterministic pipeline")
     args = parser.parse_args()
 
-    schedules = (args.region_v2_no_review, args.source_binding_pair, args.single_semantic_layout_pair)
+    schedules = (args.region_v2_no_review, args.source_binding_pair, args.single_semantic_layout_pair,
+                 args.direct_multimodal_baseline)
     if sum(schedules) > 1:
         parser.error("Choose one bounded comparison mode")
     if any(schedules) and (args.legacy_pipeline or args.full_graph):
@@ -181,7 +184,8 @@ def main() -> int:
         terminal = run_main_video(video_path=args.video, user_prompt=args.prompt,
             output_dir=output, run_id=run_id, rotate_degrees=args.rotate_degrees,
             image_path=args.image, preferred_locale=args.locale, region_v2_no_review=args.region_v2_no_review,
-            source_binding_pair=args.source_binding_pair, single_semantic_layout_pair=args.single_semantic_layout_pair)
+            source_binding_pair=args.source_binding_pair, single_semantic_layout_pair=args.single_semantic_layout_pair,
+            direct_multimodal_baseline=args.direct_multimodal_baseline)
         print(json.dumps(terminal, ensure_ascii=False, indent=2))
         return 0 if terminal.get("html_generated") and terminal.get("html_contract_passed") is not False else 1
 
