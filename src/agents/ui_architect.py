@@ -283,6 +283,8 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
                      and 0 <= bbox[1] < bbox[3] <= viewport["height"]
                      and (str(element.get("type", "")).lower() in {"line", "divider"}
                           or min(bbox[2]-bbox[0], bbox[3]-bbox[1]) > 1))
+            if "source_refs" in element:
+                element["source_refs_observed"] = copy.deepcopy(element["source_refs"])
             element["source_refs"] = [{"source": "architect", "id": element_id}]
             if vision_element:
                 used_ids.add(vision_id)

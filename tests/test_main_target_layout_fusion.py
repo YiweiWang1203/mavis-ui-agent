@@ -26,6 +26,8 @@ def test_main_target_preserves_layout_and_uses_only_verified_identity(monkeypatc
     assert rows['child']['spatial_info']['evidence_bbox'] == obs
     assert rows['child']['spatial_info']['bbox'] == [10,10,50,40]
     assert rows['conflict']['source_refs'] == [{'source':'architect','id':'conflict'}]
+    assert rows['conflict']['source_refs_observed'] == ref('a')
+    assert rows['unresolved']['source_refs_observed'] == ref('missing')
     assert rows['c']['spatial_info']['source'] == 'projected_vision_fallback'
     assert rows['unresolved']['spatial_info']['source'] == 'unresolved_target_bbox'
     fixed['elements'].pop()
