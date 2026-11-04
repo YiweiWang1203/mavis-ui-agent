@@ -36,21 +36,42 @@ class SemanticRuntimeTests(unittest.TestCase):
         self.assertEqual(slots[-3:], ["semantic_audit", "architect_repair", "semantic_reaudit"])
         self.assertEqual(output["elements"][0]["items"], PLAN["elements"][0]["items"])
 
-    def test_invalid_review_stops(self):
-        with self.assertRaises(ValueError):
-            self.exercise(PLAN, [{"verdict": "pass"}])
+    def test_invalid_review_is_reported_on_inspectable_candidate(self):
+        output, slots = self.exercise(PLAN, [{"verdict": "pass"}])
+        self.assertEqual(output["page_meta"]["semantic_review"]["verdict"], "invalid")
+        self.assertFalse(output["page_meta"]["semantic_review_passed"])
+        self.assertEqual(slots[-1], "semantic_audit")
 
     def test_unknown_does_not_pass(self):
         unresolved = {"verdict": "unresolved", "issues": [{
             "sources": [], "vision_ids": ["item"], "objects": ["item"],
-            "plan_path": "/elements/0", "expected_relation": "unclear content",
+            "plan_ref": "elements:item", "expected_relation": "unclear content",
             "actual_structure": "ambiguous", "certainty": "unknown"}]}
-        with self.assertRaisesRegex(ValueError, "SEMANTIC_AUDIT_UNRESOLVED"):
-            self.exercise(PLAN, [unresolved])
+        output, slots = self.exercise(PLAN, [unresolved])
+        self.assertFalse(output["page_meta"]["semantic_review_passed"])
+        self.assertEqual(output["page_meta"]["semantic_review"]["verdict"], "unresolved")
+        self.assertEqual(slots[-1], "semantic_audit")
 
     def test_failed_repair_is_not_retried(self):
         with self.assertRaises(ValueError):
             self.exercise("broken", [PASS, "still broken"])
+
+    def test_invalid_first_review_does_not_block_structural_repair(self):
+        output, slots = self.exercise("broken", [{"verdict": "pass"}, PLAN, PASS])
+        self.assertTrue(output["page_meta"]["semantic_review_passed"])
+        self.assertEqual(slots[-1], "semantic_reaudit")
+
+    def test_reaudit_error_remains_visible_on_structurally_valid_candidate(self):
+        error = {"verdict": "revise", "issues": [{
+            "sources": [], "vision_ids": ["item"], "objects": ["item"],
+            "plan_ref": "tree:item", "expected_relation": "supported content",
+            "actual_structure": "content differs", "certainty": "error"}]}
+        output, slots = self.exercise(PLAN, [error, PLAN, error])
+        self.assertFalse(output["page_meta"]["semantic_review_passed"])
+        issue = output["page_meta"]["semantic_review"]["issues"][0]
+        self.assertEqual(issue["plan_path"], "/region_tree/children/0")
+        self.assertEqual(issue["resolved_actual"]["id"], "item")
+        self.assertEqual(slots.count("architect_repair"), 1)
 
     def test_baseline_rejects_audit(self):
         with tempfile.TemporaryDirectory() as directory:

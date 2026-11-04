@@ -1,5 +1,5 @@
 import unittest
-from src.utils.region_audit_input import observation_content, audit_plan_view, resolve_pointer
+from src.utils.region_audit_input import observation_content, audit_plan_view, resolve_pointer, plan_references
 from src.utils.region_diagnostics import region_diagnostics
 
 
@@ -30,6 +30,14 @@ class AuditInputTests(unittest.TestCase):
         for path in ("/region_tree/children/0", "/missing", "/a~2b", "wrong"):
             with self.assertRaises(ValueError):
                 resolve_pointer(plan, path)
+
+    def test_reference_ids_bind_to_program_generated_paths(self):
+        plan = {"region_tree": {"id": "page", "children": [
+            {"id": "panel", "children": [{"id": "field"}]}]}, "requirements": [{"intent": "request"}]}
+        refs = plan_references(plan)
+        self.assertEqual(refs["tree:field"]["path"], "/region_tree/children/0/children/0")
+        self.assertEqual(refs["requirements:1"]["path"], "/requirements/0")
+        self.assertEqual(refs["requirements"]["value"], plan["requirements"])
 
     def test_independent_errors_collected_together(self):
         plan = {

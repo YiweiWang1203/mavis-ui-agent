@@ -83,6 +83,8 @@ def build_main_ui_graph(output):
         persisted = bool(code and isinstance(path, str) and Path(path).is_file()
                          and Path(path).read_text(encoding='utf-8') == code)
         state['review'] = {'reviewer': 'local_artifact_and_structure_audit',
+            'semantic_model_review': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_review'),
+            'semantic_model_passed': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_review_passed'),
             'html_persisted': persisted,
             'structure': state_summary(state.get('ui_state_json')),
             'browser_behavior': 'NOT_EXECUTED', 'semantic_requirement_coverage': 'UNKNOWN',

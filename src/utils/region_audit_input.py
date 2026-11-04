@@ -49,3 +49,34 @@ def resolve_pointer(document, pointer):
         else:
             raise ValueError("REVIEW_PLAN_POINTER_NOT_FOUND")
     return value
+
+
+def plan_references(plan):
+    references = {"plan": {"path": "", "value": plan}}
+    if not isinstance(plan, dict):
+        return references
+
+    def add(ref, path, value):
+        # Duplicate model IDs must not overwrite an earlier evidence binding.
+        if ref in references:
+            ref += "@" + path
+        references[ref] = {"path": path, "value": value}
+
+    def tree(node, path):
+        if not isinstance(node, dict):
+            return
+        add("tree:" + str(node.get("id", path)), path, node)
+        children = node.get("children")
+        if isinstance(children, list):
+            for index, child in enumerate(children):
+                tree(child, f"{path}/children/{index}")
+
+    tree(plan.get("region_tree"), "/region_tree")
+    for field in ("elements", "requirements", "actions"):
+        values = plan.get(field)
+        if isinstance(values, list):
+            add(field, "/" + field, values)
+            for index, value in enumerate(values):
+                label = value.get("id", str(index + 1)) if isinstance(value, dict) else str(index + 1)
+                add(f"{field}:{label}", f"/{field}/{index}", value)
+    return references
