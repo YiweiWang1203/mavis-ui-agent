@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.agents.coder import generate_frontend_code
-from src.agents.region_review import Review, repair_region_plan
+from src.agents.region_review import Review, SubtreeRepairFailed, repair_region_plan, repair_scope
 from src.service.main_model_runtime import MODEL, MainModelRuntime
 from src.service.main_ui_workflow import safe_diagnostic, sha
 from src.utils.pipeline_trace import PipelineTrace
@@ -78,7 +78,7 @@ def load_cases(manifest_path):
     return manifest, sha(source_manifest_path), cases
 
 
-def run_branch(folder, name, branch, data, segments, review, identity, dispatch=None):
+def run_branch(folder, name, branch, data, segments, review, identity, dispatch=None, *, repair_mode="full_plan"):
     folder.mkdir(parents=True, exist_ok=False)
     profile = "repair_probe_feedback2" if branch == "feedback" else "repair_probe_control1"
     terminal = {"branch": branch, "profile": profile, "status": "NO_HTML", "model_calls": []}
@@ -92,7 +92,8 @@ def run_branch(folder, name, branch, data, segments, review, identity, dispatch=
             selected = data["plan"]
             if branch == "feedback":
                 selected = repair_region_plan(selected, [], MODEL, data["planner_system"],
-                                              data["planner_content"], review=review)
+                                              data["planner_content"], review=review, segments=segments,
+                                              mode=repair_mode)
             write_new(folder / "selected_plan.json", selected)
             state = compile_region_tree(selected, segments, schema_version=2)
             write_new(folder / "compiled_ui_state.json", state)
@@ -106,6 +107,9 @@ def run_branch(folder, name, branch, data, segments, review, identity, dispatch=
                 stream.write(saved.read_bytes())
             terminal.update(status="HTML_PENDING_INDEPENDENT_ACCEPTANCE", html_sha256=sha(artifact),
                             renderer=result["renderer"], html_validation=result["html_validation"])
+        except SubtreeRepairFailed as error:
+            terminal["status"] = "repair_failed"
+            write_new(folder / "failure.json", safe_diagnostic(error))
         except Exception as error:
             write_new(folder / "failure.json", safe_diagnostic(error))
         finally:
@@ -119,10 +123,15 @@ def main():
     parser.add_argument("manifest", type=Path)
     parser.add_argument("output", type=Path, nargs="?")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--repair-mode", choices=("full_plan", "local_subtree"), default="full_plan")
     args = parser.parse_args()
     manifest, source_manifest_sha256, cases = load_cases(args.manifest)
+    scopes = {}
+    if args.repair_mode == "local_subtree":
+        scopes = {name: repair_scope(data["plan"], review) for name, (data, _, review) in cases.items()}
     if args.validate_only:
-        print(json.dumps({"cases": list(cases), "max_physical_requests": 3 * len(cases)}))
+        print(json.dumps({"cases": list(cases), "max_physical_requests": 3 * len(cases),
+                          "repair_mode": args.repair_mode, "repair_scopes": scopes}))
         return 0
     if args.output is None or not re.fullmatch(r"[A-Za-z0-9_-]{1,48}", args.output.name):
         parser.error("Provide a new output directory with a short, alphanumeric run name")
@@ -140,7 +149,8 @@ def main():
     os.environ.update(config["environment"])
     args.output.mkdir(parents=True, exist_ok=False)
     identity = {
-        "mode": "repair_probe_v1_frozen_plan_diagnostic", "run_id": args.output.name,
+        "mode": "repair_probe_v2_local_subtree_diagnostic" if scopes else "repair_probe_v1_frozen_plan_diagnostic",
+        "run_id": args.output.name, "repair_mode": args.repair_mode, "repair_scopes": scopes,
         "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "host": platform.node(), "interpreter": sys.executable, "model": MODEL,
         "config_sha256": sha(config_path), "manifest_sha256": sha(args.manifest), "manifest": manifest,
@@ -155,7 +165,7 @@ def main():
         results[name] = {}
         for branch in ("control", "feedback"):
             results[name][branch] = run_branch(args.output / name / branch, name, branch, data,
-                                               segments, review, identity)
+                                               segments, review, identity, repair_mode=args.repair_mode)
     write_new(args.output / "summary.json", results)
     return 0 if all(x["status"] == "HTML_PENDING_INDEPENDENT_ACCEPTANCE"
                     for pair in results.values() for x in pair.values()) else 1

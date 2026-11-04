@@ -1,14 +1,15 @@
 """One independent semantic review, one bounded repair, and one re-review."""
 import json
 import os
+from copy import deepcopy
 from typing import Literal
 from pydantic import Field, create_model
 
-from src.schemas.region_plan import Contract, RegionPlan
+from src.schemas.region_plan import Contract, Region
 from src.service.main_model_runtime import main_client, note_rejected_architect_repair
 from src.utils.pipeline_trace import trace_event
 from src.utils.region_tree import compile_region_tree
-from src.utils.region_audit_input import observation_content, audit_plan_view, plan_references
+from src.utils.region_audit_input import observation_content, audit_plan_view, plan_references, resolve_pointer
 from src.utils.region_diagnostics import region_diagnostics
 
 
@@ -44,7 +45,85 @@ def request_region_review(model, stage, system, payload, original_content=None):
     return json.loads(response.choices[0].message.content)
 
 
-def repair_region_plan(plan, structural_errors, model, planner_prompt, planner_content, *, review=None):
+class SubtreeRepairFailed(ValueError):
+    pass
+
+
+class SubtreeEdit(Contract):
+    replacement_subtree: Region
+
+
+def repair_scope(plan, review):
+    refs = plan_references(plan)
+    paths = []
+    for issue in (review or {}).get("issues", []):
+        if issue["certainty"] != "error":
+            continue
+        ref = refs.get(issue["plan_ref"])
+        if ref is None or not issue["plan_ref"].startswith("tree:"):
+            raise ValueError("SUBTREE_REPAIR_REQUIRES_TREE_REFERENCE")
+        path = ref["path"]
+        if issue.get("plan_path", path) != path:
+            raise ValueError("SUBTREE_REPAIR_REFERENCE_MISMATCH")
+        if "children" not in ref["value"]:
+            path = path.rsplit("/children/", 1)[0]
+        paths.append(path)
+    if not paths:
+        raise ValueError("SUBTREE_REPAIR_REQUIRES_LOCATED_ERROR")
+    scope = paths[0]
+    for path in paths[1:]:
+        while path != scope and not path.startswith(scope + "/"):
+            scope = scope.rsplit("/children/", 1)[0]
+    return scope
+
+
+def leaf_ids(node):
+    if "children" not in node:
+        return {node["id"]}
+    return set().union(*(leaf_ids(child) for child in node["children"]))
+
+
+def repair_subtree(plan, model, planner_prompt, planner_content, payload, segments):
+    try:
+        path = repair_scope(plan, payload.get("review"))
+        before = resolve_pointer(plan, path)
+        trace_event("architect.subtree_repair_before", path=path, output=before)
+        payload.update(
+            target_path=path,
+            target_subtree=before,
+            instruction="Return only replacement_subtree for target_path. Correct the supported layout issues "
+            "inside this region. Preserve the root ID, all leaf IDs and unrelated relationships.",
+        )
+        system = (planner_prompt + "\nThis is a local repair request. The following output schema "
+                  "supersedes the complete-plan output instructions above:\n"
+                  + json.dumps(SubtreeEdit.model_json_schema()))
+        raw = request_region_review(model, "architect_repair", system, payload, original_content=planner_content)
+        trace_event("architect.subtree_repair_raw_edit", path=path, output=raw)
+        SubtreeEdit.model_validate(raw)
+        replacement = raw["replacement_subtree"]
+        if replacement["id"] != before["id"]:
+            raise ValueError("SUBTREE_REPAIR_ROOT_ID_CHANGED")
+        if leaf_ids(replacement) != leaf_ids(before):
+            raise ValueError("SUBTREE_REPAIR_LEAF_IDS_CHANGED")
+        if Region.model_validate(replacement) == Region.model_validate(before):
+            raise ValueError("SUBTREE_REPAIR_NO_CHANGE")
+        candidate = deepcopy(plan)
+        parent_path, key = path.rsplit("/", 1)
+        parent = resolve_pointer(candidate, parent_path)
+        parent[int(key) if isinstance(parent, list) else key] = replacement
+        trace_event("architect.subtree_repair_candidate", path=path, output=replacement)
+        compile_region_tree(candidate, segments, schema_version=2)
+        trace_event("architect.subtree_repair_applied", path=path, output=replacement)
+        return candidate
+    except Exception as error:
+        diagnostic = str(error) if isinstance(error, ValueError) else type(error).__name__
+        trace_event("architect.subtree_repair_failed", output={"error": diagnostic})
+        raise SubtreeRepairFailed(diagnostic) from error
+
+
+def repair_region_plan(plan, structural_errors, model, planner_prompt, planner_content, *, review=None,
+                       segments=None, mode=None):
+    mode = mode or os.getenv("UI_REGION_REPAIR_MODE", "full_plan")
     payload = {
         "previous_plan": plan,
         "structural_errors": structural_errors,
@@ -53,6 +132,10 @@ def repair_region_plan(plan, structural_errors, model, planner_prompt, planner_c
     }
     if review is not None:
         payload["review"] = review
+    if mode == "local_subtree":
+        return repair_subtree(plan, model, planner_prompt, planner_content, payload, segments)
+    if mode != "full_plan":
+        raise ValueError("UNSUPPORTED_REGION_REPAIR_MODE")
     return request_region_review(model, "architect_repair", planner_prompt, payload,
                                  original_content=planner_content)
 
@@ -153,11 +236,13 @@ def review_region_plan(plan, segments, vision, original_intent, model, planner_p
     if structural_errors or (not shadow and first["verdict"] == "revise"):
         try:
             repaired = repair_region_plan(plan, structural_errors, model, planner_prompt, planner_content,
-                                          review=None if shadow else first)
+                                          review=None if shadow else first, segments=segments)
             trace_event("architect.repair_parsed", output=repaired, previous=plan)
             result = compile_region_tree(repaired, segments, schema_version=2)
         except ValueError as error:
             selection.update(repair_rejected=True, diagnostic=str(error))
+            if isinstance(error, SubtreeRepairFailed):
+                selection["repair_failed"] = True
             trace_event("architect.repair_rejected", output=selection)
             if shadow:
                 raise

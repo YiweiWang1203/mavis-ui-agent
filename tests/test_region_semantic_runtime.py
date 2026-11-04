@@ -38,6 +38,42 @@ class SemanticRuntimeTests(unittest.TestCase):
         self.assertEqual(slots[-3:], ["semantic_audit", "architect_repair", "semantic_reaudit"])
         self.assertEqual(output["elements"][0]["items"], PLAN["elements"][0]["items"])
 
+    @patch.dict("os.environ", {"UI_REGION_REPAIR_MODE": "local_subtree",
+                               "UI_REGION_AUDIT_POLICY": "repair_on_revise"})
+    def test_local_repair_uses_parent_scope_and_preserves_other_plan_values(self):
+        plan = deepcopy(PLAN)
+        plan["elements"].append({"id": "title", "type": "text", "origin": "vision"})
+        scope = {"id": "group", "axis": "row", "children": plan["region_tree"]["children"]}
+        plan["region_tree"]["children"] = [scope, {"id": "title"}]
+        original = deepcopy(plan)
+        issue = {"verdict": "revise", "issues": [{
+            "sources": [], "vision_ids": ["item"], "objects": ["item"],
+            "plan_ref": "tree:item", "expected_relation": "other side",
+            "actual_structure": "item is at end", "certainty": "error"}]}
+        replacement = deepcopy(scope)
+        replacement["children"][0]["cross_align"] = "start"
+        output, slots = self.exercise(plan, [issue, {"replacement_subtree": replacement}, PASS])
+        self.assertTrue(output["page_meta"]["semantic_review_passed"])
+        self.assertEqual(output["region_tree"]["children"][0]["children"], replacement["children"])
+        self.assertEqual(output["region_tree"]["children"][1]["id"], "title")
+        self.assertEqual(plan, original)
+        self.assertEqual(slots[-3:], ["semantic_audit", "architect_repair", "semantic_reaudit"])
+
+        for invalid, reason in (
+            (scope, "SUBTREE_REPAIR_NO_CHANGE"),
+            (replacement | {"id": "renamed"}, "SUBTREE_REPAIR_ROOT_ID_CHANGED"),
+            (replacement | {"children": [{"id": "title"}]}, "SUBTREE_REPAIR_LEAF_IDS_CHANGED"),
+            (replacement | {"children": [{"id": "item", "slot": "bottom"}]}, "REGION_CONTRACT_INVALID"),
+        ):
+            with self.subTest(reason=reason):
+                output, slots = self.exercise(plan, [issue, {"replacement_subtree": invalid}])
+                selection = output["page_meta"]["plan_selection"]
+                self.assertTrue(selection["repair_failed"])
+                self.assertEqual(selection["selected"], "initial")
+                self.assertIn(reason, selection["diagnostic"])
+                self.assertFalse(output["page_meta"]["semantic_review_passed"])
+                self.assertEqual(slots[-1], "architect_repair")
+
     def test_invalid_review_is_reported_on_inspectable_candidate(self):
         output, slots = self.exercise(PLAN, [{"verdict": "pass"}])
         self.assertEqual(output["page_meta"]["semantic_review"]["verdict"], "invalid")
