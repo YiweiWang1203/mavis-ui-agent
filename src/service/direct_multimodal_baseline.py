@@ -9,8 +9,8 @@ import re
 
 from PIL import Image
 
-from src.renderers.bounded_svg_uri import decoded_css_escapes
-from src.renderers.region_bundle import check_asset_text
+from src.renderers.bounded_svg_uri import decoded_css_escapes, validate_css_svg_urls
+from src.renderers.region_bundle import SVG_TAGS, check_asset_text
 from src.service.main_model_runtime import MODEL, main_client
 from src.utils.pipeline_trace import trace_event
 
@@ -25,6 +25,7 @@ PROMPT = (
     "Return only the HTML document."
 )
 DIRECT_ASSET_POLICY = "direct_icon_catalog_v1"
+BOUNDED_CSS_COMPATIBILITY = "direct_bounded_css_svg_compatibility_v1"
 ICON_CATALOG = {
     "back": '<path d="m14 6-6 6 6 6"/>',
     "forward": '<path d="m10 6 6 6-6 6"/>',
@@ -67,12 +68,14 @@ class DocumentBoundary(HTMLParser):
 
 
 class CompactAssets(HTMLParser):
-    def __init__(self, html):
+    def __init__(self, html, *, allow_bounded_css_svg=False):
         super().__init__()
         self.html = html
         self.insertions = []
         self.line_starts = [0, *(match.end() for match in re.finditer("\n", html))]
         self.raw_text_tag = None
+        self.allow_bounded_css_svg = allow_bounded_css_svg
+        self.styles = []
 
     def source_index(self):
         line, column = self.getpos()
@@ -105,13 +108,22 @@ class CompactAssets(HTMLParser):
             self.raw_text_tag = None
 
     @staticmethod
-    def check_css(css):
-        css = decoded_css_escapes(css)
-        check_asset_text(css, "css")
+    def check_css(css, *, allow_bounded_css_svg=False):
+        if allow_bounded_css_svg:
+            validate_css_svg_urls(css, SVG_TAGS, CompactAssets.check_non_asset_css)
+        else:
+            CompactAssets.check_non_asset_css(decoded_css_escapes(css), "css")
+
+    @staticmethod
+    def check_non_asset_css(css, scope):
+        check_asset_text(css, scope)
         if re.search(r"(?<![\w-])d\s*:|\bpath\s*\(", css, re.I):
             raise ValueError("DIRECT_BASELINE_CSS_VECTOR_DATA")
 
     def handle_data(self, data):
+        if self.raw_text_tag == "style" and self.allow_bounded_css_svg:
+            self.styles.append(data)
+            return
         if self.raw_text_tag is not None:
             check_asset_text(data, self.raw_text_tag)
             if re.search(r"<\s*(?:svg|path)\b|createElementNS\s*\(", data, re.I):
@@ -120,10 +132,12 @@ class CompactAssets(HTMLParser):
             self.check_css(data)
 
 
-def expand_catalog_icons(html):
-    parser = CompactAssets(html)
+def expand_catalog_icons(html, *, allow_bounded_css_svg=False):
+    parser = CompactAssets(html, allow_bounded_css_svg=allow_bounded_css_svg)
     parser.feed(html)
     parser.close()
+    if allow_bounded_css_svg:
+        parser.check_css("\n".join(parser.styles), allow_bounded_css_svg=True)
     for offset, name in reversed(parser.insertions):
         svg = (
             '<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -152,7 +166,7 @@ HTML_FENCE = re.compile(
 NESTED_FENCE_LINE = re.compile(r"(?m)^[ \t]*(?:`{3,}|~{3,})")
 
 
-def save_direct_html(raw, finish_reason, output, *, compact_assets=False):
+def save_direct_html(raw, finish_reason, output, *, compact_assets=False, allow_bounded_css_svg=False):
     if finish_reason != "stop":
         raise ValueError("DIRECT_BASELINE_INCOMPLETE_RESPONSE")
     envelope = HTML_FENCE.fullmatch(raw)
@@ -163,8 +177,8 @@ def save_direct_html(raw, finish_reason, output, *, compact_assets=False):
     require_complete_html(html)
     model_payload = html.encode("utf-8")
     icons = []
-    if compact_assets:
-        html, icons = expand_catalog_icons(html)
+    if compact_assets or allow_bounded_css_svg:
+        html, icons = expand_catalog_icons(html, allow_bounded_css_svg=allow_bounded_css_svg)
     artifact = output / "final.html"
     payload = html.encode("utf-8")
     with artifact.open("xb") as stream:
@@ -179,7 +193,8 @@ def save_direct_html(raw, finish_reason, output, *, compact_assets=False):
         "response_utf8_start": len(raw[:start].encode("utf-8")),
         "response_utf8_end": len(raw[:end].encode("utf-8")),
         **({"model_html_sha256": hashlib.sha256(model_payload).hexdigest(),
-            "expanded_icons": icons} if compact_assets else {}),
+            "expanded_icons": icons} if compact_assets or allow_bounded_css_svg else {}),
+        **({"asset_compatibility": BOUNDED_CSS_COMPATIBILITY} if allow_bounded_css_svg else {}),
     }
 
 

@@ -1,8 +1,10 @@
 import base64
 import hashlib
 import json
+import re
 import sys
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import pytest
 from PIL import Image
@@ -137,7 +139,6 @@ def test_catalog_expands_only_the_exact_references(tmp_path):
     rendered = (tmp_path / "final.html").read_bytes()
     assert rendered.count(b"<svg ") == 1
     assert b'width="1em" height="1em"' in rendered
-    import re
     assert re.sub(rb"<svg [^>]*>.*?</svg>", b"", rendered) == html.encode("utf-8")
     assert result["expanded_icons"] == ["location"]
     assert result["model_html_sha256"] == hashlib.sha256(html.encode("utf-8")).hexdigest()
@@ -159,4 +160,40 @@ def test_catalog_expands_only_the_exact_references(tmp_path):
 def test_catalog_rejects_authored_or_malformed_assets(tmp_path, markup, error):
     with pytest.raises(ValueError, match=error):
         save_direct_html(HTML.replace("<input>", markup), "stop", tmp_path, compact_assets=True)
+    assert not (tmp_path / "final.html").exists()
+
+
+def test_compatibility_preserves_original_css_svg_and_expands_catalog(tmp_path):
+    uri = ('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" '
+           'viewBox="0 0 100 100"><path d="M10 10 L90 90 M90 10 L10 90" stroke="%23999" '
+           'stroke-width="2" fill="none"/></svg>')
+    assert len(uri.encode("utf-8")) == 201
+    css = f"<style>.placeholder::before{{background-image:url('{uri}')}}</style>"
+    marker = '<span data-ui-icon="back"></span>'
+    html = HTML.replace("</head>", css + "</head>").replace("<input>", marker)
+    with pytest.raises(ValueError, match="OPAQUE_ASSET"):
+        save_direct_html(html, "stop", tmp_path, compact_assets=True)
+    result = save_direct_html(html, "stop", tmp_path, allow_bounded_css_svg=True)
+    rendered = (tmp_path / "final.html").read_bytes()
+    assert css.encode() in rendered
+    assert re.sub(rb'<svg width="1em"[^>]*>.*?</svg>', b"", rendered) == html.encode("utf-8")
+    assert result["expanded_icons"] == ["back"]
+    assert result["asset_compatibility"] == "direct_bounded_css_svg_compatibility_v1"
+
+
+@pytest.mark.parametrize("markup", [
+    '<style>.a{background:url("data:image/svg+xml;base64,PHN2Zz4=")}</style>',
+    '<style>.a{background:url("data:image/png,%00")}</style>',
+    '<style>.a{background:url("data:image/svg+xml,' + quote('<svg><script>x()</script></svg>') + '")}</style>',
+    '<style>.a{background:url("data:image/svg+xml,' + quote('<svg><use href="https://x.test"/></svg>') + '")}</style>',
+    '<style>.a{background:url("data:image/svg+xml,' + quote('<svg><desc>' + 'x' * 2050 + '</desc></svg>') + '")}</style>',
+    ('<style>.a{background:url("data:image/svg+xml,' + quote('<svg><desc>' + 'x' * 1700 + '</desc></svg>') + '")}</style>') * 5,
+    '<img src="data:image/svg+xml,%3Csvg/%3E">',
+    '<div style="background:url(data:image/svg+xml,%3Csvg/%3E)"></div>',
+    '<script>let x="data:image/svg+xml,%3Csvg/%3E"</script>',
+    '<style>.icon path{d:"M0 0 0.01 0.02"}</style>',
+])
+def test_compatibility_rejects_unbounded_or_out_of_scope_assets(tmp_path, markup):
+    with pytest.raises(ValueError, match="SVG_URI|OPAQUE_ASSET|CSS_VECTOR_DATA"):
+        save_direct_html(HTML.replace("<input>", markup), "stop", tmp_path, allow_bounded_css_svg=True)
     assert not (tmp_path / "final.html").exists()

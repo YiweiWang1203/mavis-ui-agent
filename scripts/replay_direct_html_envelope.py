@@ -11,7 +11,7 @@ import tarfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.service.direct_multimodal_baseline import HTML_FENCE, save_direct_html
+from src.service.direct_multimodal_baseline import BOUNDED_CSS_COMPATIBILITY, DIRECT_ASSET_POLICY, HTML_FENCE, save_direct_html
 from src.service.main_ui_workflow import save, sha
 
 
@@ -20,6 +20,8 @@ def main():
     parser.add_argument("archive", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--source-sha256", required=True)
+    parser.add_argument("--bounded-css-svg", action="store_true",
+                        help="Replay a catalog-policy rejection using the bounded CSS SVG compatibility policy")
     args = parser.parse_args()
     source_sha = args.source_sha256.lower()
     if not re.fullmatch(r"[0-9a-f]{64}", source_sha) or sha(args.archive) != source_sha:
@@ -34,9 +36,11 @@ def main():
         raw_terminal = archive.extractfile(root + "/terminal.json").read()
     terminal = json.loads(raw_terminal)
     packet = json.loads(raw_response)
+    source_profile = (terminal.get("asset_policy") == DIRECT_ASSET_POLICY if args.bounded_css_svg else
+                      terminal.get("config", {}).get("runtime_profile") == "direct_multimodal_baseline_v1")
     if (terminal["status"] != "FAILED_NO_RETRY" or terminal["html_generated"]
             or terminal["model_calls"] != ["direct_coder"]
-            or terminal["config"]["runtime_profile"] != "direct_multimodal_baseline_v1"
+            or not source_profile
             or not packet.get("ok") or len(packet["response"]["choices"]) != 1):
         raise ValueError("DIRECT_HTML_REPLAY_SOURCE_TERMINAL")
     choice = packet["response"]["choices"][0]
@@ -47,9 +51,9 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     (output / "original_response.json").write_bytes(raw_response)
     (output / "original_terminal.json").write_bytes(raw_terminal)
-    result = save_direct_html(raw, choice["finish_reason"], output)
+    result = save_direct_html(raw, choice["finish_reason"], output, allow_bounded_css_svg=args.bounded_css_svg)
     result.update({
-        "recovery_version": "direct_html_envelope_recovery_v1",
+        "recovery_version": BOUNDED_CSS_COMPATIBILITY if args.bounded_css_svg else "direct_html_envelope_recovery_v1",
         "source_archive_sha256": source_sha, "original_status": terminal["status"],
         "original_html_generated": terminal["html_generated"], "raw_reply_sha256": hashlib.sha256(raw.encode()).hexdigest(),
         "model_calls": [], "physical_requests": 0, "browser_acceptance": "NOT_EXECUTED",
