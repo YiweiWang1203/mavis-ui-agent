@@ -375,6 +375,14 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
     if semantic_mode!='off':
         from pathlib import Path
         system_prompt += '\n' + (Path(__file__).resolve().parents[1]/'prompts/spoken_input_evidence.md').read_text(encoding='utf-8')
+    observation_mode = os.getenv("UI_PLANNER_OBSERVATION_MODE", "full_v1")
+    if observation_mode == "relative_v1":
+        from src.service.planner_observation import relative_vision_observations
+        request_vision = relative_vision_observations(vision_elements)
+    elif observation_mode == "full_v1":
+        request_vision = vision_elements
+    else:
+        raise ValueError("Unsupported UI_PLANNER_OBSERVATION_MODE")
     user_content = f"""
 [User Intent]
 {user_intent}
@@ -383,7 +391,7 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
 {preferred_locale or infer_locale_from_text(user_intent)}
 
 [Vision Elements]
-{json.dumps(vision_elements, ensure_ascii=False, indent=2)}
+{json.dumps(request_vision, ensure_ascii=False, indent=2)}
 
 Return the final fused UI-State JSON.
 """
