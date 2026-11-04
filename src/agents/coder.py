@@ -141,6 +141,18 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
         system_prompt = (prompt_dir / "coder_region_tree.md").read_text(encoding="utf-8")
         system_prompt += "\n\n" + (prompt_dir / "coder_native_controls.md").read_text(encoding="utf-8")
         system_prompt += "\nThe native control rules preserve geometry only as defined by region_tree. Use the tree as the only layout contract. Do not infer or apply legacy bounding boxes."
+        if ui_state_json.get("page_meta", {}).get("contract_version") == 2:
+            from src.utils.region_execution import region_styles
+            system_prompt += (
+                "\nImplement every actions entry: its trigger must cause its state_change and observable_result. "
+                "Explicitly requested local subviews, editing panels and dialogs are permitted. "
+                "The restriction on extra pages applies only to unrequested additions. "
+                "Implement repeated items as distinct rows and bind requested row interactions. "
+                "Show recognizable asset_content, using embedded SVG or local content when appropriate, "
+                "not generic empty or text-only image placeholders. Preserve supplied content and labels. "
+                "Avoid horizontal overflow and clipped controls. Do not use inline important layout styles. "
+                "The following tree-derived CSS is appended by the system; style around it and do not override it:\n"
+                + region_styles(region_tree))
     else:
         system_prompt = read_coder_prompt()
     if (ui_state_json.get('page_meta',{}).get('layout_solver') or {}).get('version') == 'hierarchy-v1':
@@ -182,6 +194,9 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
         if region_tree:
             from src.utils.region_tree import check_region_markup
             check_region_markup(code, region_tree)
+            if ui_state_json.get("page_meta", {}).get("contract_version") == 2:
+                from src.utils.region_execution import attach_region_styles
+                code = attach_region_styles(code, region_tree)
         trace_html_contract(code,ui_state_json,renderer='llm',
                     finish_reason=getattr(response.choices[0],'finish_reason',None))
 

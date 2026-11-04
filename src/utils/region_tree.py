@@ -44,7 +44,7 @@ def compile_region_tree(plan, segments, *, schema_version=1):
         origin = element.get("origin")
         require(origin in ("speech", "vision", "both", "request"), path + ".origin")
         inventory[key] = {field: element[field] for field in (
-            "id", "type", "text", "rpa_action", "origin", "placeholder", "input_type", "items"
+            "id", "type", "text", "rpa_action", "origin", "placeholder", "input_type", "items", "asset_content"
         ) if field in element}
 
     seen = set()
@@ -104,8 +104,16 @@ def compile_region_tree(plan, segments, *, schema_version=1):
                          "certainty": certainty, "scope": scope, "references": list(dict.fromkeys(references)),
                          "evidence": [{"id": key, **segments[key]} for key in dict.fromkeys(sources)],
                          "targets": list(dict.fromkeys(targets))})
-    return {"page_meta": {"viewport": viewport, "structure_mode": "region_tree_v1"},
-            "region_tree": tree, "elements": list(inventory.values()), "requirements": compiled}
+    result = {"page_meta": {"viewport": viewport, "structure_mode": "region_tree_v1"},
+              "region_tree": tree, "elements": list(inventory.values()), "requirements": compiled}
+    if schema_version == 2:
+        actions = plan["actions"]
+        for index, action in enumerate(actions):
+            require(action["target"] in inventory, f"actions[{index}].target")
+            require(set(action["sources"]) <= segments.keys(), f"actions[{index}].sources")
+        result["actions"] = actions
+        result["page_meta"]["contract_version"] = 2
+    return result
 
 
 def check_region_markup(code, tree):

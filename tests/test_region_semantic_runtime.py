@@ -12,6 +12,7 @@ PLAN = {
     "elements": [{"id": "item", "type": "text", "origin": "vision",
                   "items": [{"id": "detail", "text": "entry"}]}],
     "requirements": [],
+    "actions": [],
     "region_tree": {"id": "page", "axis": "column", "children": [
         {"id": "item", "cross_align": "end", "grow": True}]},
 }
@@ -66,6 +67,22 @@ class SemanticRuntimeTests(unittest.TestCase):
                 self.assertEqual(runtime.used, ["vision_initial"])
                 with self.assertRaisesRegex(RuntimeError, "PRIOR_REQUEST_FAILED"):
                     runtime.create("vision", model=MODEL)
+
+    def test_all_seven_slots_and_cap(self):
+        from src.service.main_model_runtime import note_vision_repair
+        packet = {"ok": True, "response": {"choices": [{
+            "finish_reason": "stop", "message": {"content": "{}"}}]}}
+        with tempfile.TemporaryDirectory() as directory:
+            with MainModelRuntime(Path(directory) / "run", lambda *a, **k: packet,
+                                  profile="semantic7") as runtime:
+                runtime.create("vision", model=MODEL)
+                note_vision_repair({"reason": "invalid observation"})
+                for stage in ("vision", "architect", "semantic_audit", "architect_repair",
+                              "semantic_reaudit", "coder"):
+                    runtime.create(stage, model=MODEL)
+                self.assertEqual(len(runtime.used), 7)
+                with self.assertRaises(RuntimeError):
+                    runtime.create("coder", model=MODEL)
 
 
 if __name__ == "__main__":

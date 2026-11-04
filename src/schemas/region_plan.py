@@ -35,6 +35,15 @@ class Element(Contract):
     placeholder: str | None = None
     input_type: str | None = None
     items: list[dict] = Field(default_factory=list)
+    asset_content: str | None = None
+
+
+class Action(Contract):
+    sources: list[str] = Field(min_length=1)
+    target: str
+    trigger: str = Field(min_length=1)
+    state_change: str = Field(min_length=1)
+    observable_result: str = Field(min_length=1)
 
 
 class Placement(Contract):
@@ -58,3 +67,4 @@ class RegionPlan(Contract):
     requirements: list[Requirement]
     elements: list[Element] = Field(min_length=1)
     region_tree: Region
+    actions: list[Action]
