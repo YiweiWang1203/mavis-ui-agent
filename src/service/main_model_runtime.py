@@ -20,6 +20,7 @@ MEMBERSHIP_RECOVERY_CONTROL = "semantic_membership_recovery_control1"
 MEMBERSHIP_RECOVERY_CANDIDATE = "semantic_membership_recovery_candidate2"
 DIRECT_MULTIMODAL_PROFILE = "direct_multimodal_baseline_v1"
 NATIVE_HTML_AUTOREVIEW_PROFILE = "native_html_autoreview_v1"
+NATIVE_HTML_RELATION_AUDIT_PROFILE = "native_html_relation_audit_v2"
 
 
 def main_client(stage):
@@ -77,7 +78,8 @@ class MainModelRuntime:
                   SOURCE_BINDING_RECOVERY_PROFILE: 1, SEMANTIC_LAYOUT_UPSTREAM_PROFILE: 2,
                   **dict.fromkeys(SEMANTIC_LAYOUT_ARM_PROFILES.values(), 2),
                   MEMBERSHIP_RECOVERY_CONTROL: 1, MEMBERSHIP_RECOVERY_CANDIDATE: 2,
-                  DIRECT_MULTIMODAL_PROFILE: 1, NATIVE_HTML_AUTOREVIEW_PROFILE: 1}
+                  DIRECT_MULTIMODAL_PROFILE: 1, NATIVE_HTML_AUTOREVIEW_PROFILE: 1,
+                  NATIVE_HTML_RELATION_AUDIT_PROFILE: 1}
         if profile not in limits:
             raise ValueError("UNKNOWN_RUNTIME_PROFILE")
         self.profile = profile
@@ -117,7 +119,7 @@ class MainModelRuntime:
                     'coder' if self.used[-1] == 'architect' else 'architect')
         if self.profile == DIRECT_MULTIMODAL_PROFILE:
             allowed = {"direct_coder"}
-        elif self.profile == NATIVE_HTML_AUTOREVIEW_PROFILE:
+        elif self.profile in {NATIVE_HTML_AUTOREVIEW_PROFILE, NATIVE_HTML_RELATION_AUDIT_PROFILE}:
             allowed = {"native_html_review"}
         elif self.profile == "audit1":
             allowed = {"semantic_audit"}

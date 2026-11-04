@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.service.direct_multimodal_baseline import HTML_FENCE, expand_catalog_icons, require_complete_html
-from src.service.main_model_runtime import NATIVE_HTML_AUTOREVIEW_PROFILE, MainModelRuntime
+from src.service.main_model_runtime import NATIVE_HTML_AUTOREVIEW_PROFILE, NATIVE_HTML_RELATION_AUDIT_PROFILE, MainModelRuntime
 from src.service.main_ui_workflow import safe_diagnostic, save, sha
 from src.service.native_html_autoreview import run_native_html_autoreview
 from src.utils.pipeline_trace import PipelineTrace
@@ -55,6 +55,7 @@ def main():
     parser.add_argument("initial_screenshot", type=Path)
     parser.add_argument("output", type=Path, nargs="?")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--relation-audit", action="store_true")
     args = parser.parse_args()
     request, html, screenshot = load_frozen(args.model_archive, args.browser_archive, args.initial_screenshot)
     if args.validate_only:
@@ -72,8 +73,9 @@ def main():
     (output / "initial_request.json").write_bytes(request)
     (output / "initial_model.html").write_bytes(html.encode("utf-8"))
     (output / "initial_screenshot.jpg").write_bytes(screenshot)
+    profile = NATIVE_HTML_RELATION_AUDIT_PROFILE if args.relation_audit else NATIVE_HTML_AUTOREVIEW_PROFILE
     identity = {
-        "mode": NATIVE_HTML_AUTOREVIEW_PROFILE, "initial_model_archive_sha256": MODEL_ARCHIVE_SHA,
+        "mode": profile, "initial_model_archive_sha256": MODEL_ARCHIVE_SHA,
         "initial_browser_archive_sha256": BROWSER_ARCHIVE_SHA, "initial_browser_sha256": BROWSER_HTML_SHA,
         "initial_model_html_sha256": MODEL_HTML_SHA, "initial_screenshot_sha256": SCREENSHOT_SHA,
         "max_physical_requests": 1, "max_output_tokens": 8192, "timeout_seconds": 600, "automatic_retries": 0,
@@ -82,9 +84,9 @@ def main():
     save(output / "run_identity.json", identity)
     terminal = {**identity, "status": "FAILED_NO_RETRY"}
     with PipelineTrace(output / "trace", identity), MainModelRuntime(
-            output / "requests", profile=NATIVE_HTML_AUTOREVIEW_PROFILE) as runtime:
+            output / "requests", profile=profile) as runtime:
         try:
-            review = run_native_html_autoreview(json.loads(request), html, screenshot)
+            review = run_native_html_autoreview(json.loads(request), html, screenshot, relation_audit=args.relation_audit)
             save(output / "review.json", review)
             terminal.update(status="REVIEW_READY_FOR_INDEPENDENT_ASSESSMENT", issue_count=len(review["issues"]))
         except Exception as error:
