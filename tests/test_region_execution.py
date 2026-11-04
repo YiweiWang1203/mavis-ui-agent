@@ -1,6 +1,6 @@
 import unittest
 from src.utils.region_execution import attach_region_styles
-from src.utils.region_tree import compile_region_tree
+from src.utils.region_tree import compile_region_tree, check_region_markup
 
 
 class RegionExecutionTests(unittest.TestCase):
@@ -29,3 +29,12 @@ class RegionExecutionTests(unittest.TestCase):
     def test_missing_head_fails_explicitly(self):
         with self.assertRaisesRegex(ValueError, "ONE_HEAD"):
             attach_region_styles("<html></html>", {"id": "page"})
+
+    def test_direct_parent_contract_rejects_intervening_wrapper(self):
+        tree = {"id": "page", "axis": "column", "children": [{"id": "field"}]}
+        wrapped = '<main data-ui-id="page" data-ui-axis="column"><div><input data-ui-id="field"></div></main>'
+        check_region_markup(wrapped, tree)
+        with self.assertRaisesRegex(ValueError, "MISMATCH"):
+            check_region_markup(wrapped, tree, direct_parent=True)
+        direct = '<main data-ui-id="page" data-ui-axis="column"><div data-ui-id="field"><input></div></main>'
+        check_region_markup(direct, tree, direct_parent=True)

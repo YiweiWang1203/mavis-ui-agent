@@ -5,7 +5,7 @@ import re
 def region_styles(tree):
     rules = []
 
-    def visit(node):
+    def visit(node, parent_axis=None):
         escaped = "".join(f"\\{ord(char):x} " for char in node["id"])
         selector = f'[data-ui-id="{escaped}"]'
         declarations = ["min-width:0", "min-height:0", "box-sizing:border-box"]
@@ -15,6 +15,9 @@ def region_styles(tree):
             alignment = {"start": "flex-start", "end": "flex-end",
                          "center": "center", "stretch": "stretch"}[node["cross_align"]]
             declarations.append("align-self:" + alignment)
+            dimension = "width" if parent_axis == "column" else "height"
+            declarations.append(dimension + (":auto" if node["cross_align"] == "stretch" else ":fit-content"))
+            declarations.append("max-" + dimension + ":100%")
         if node.get("grow"):
             declarations.append("flex:1 1 0%")
         if node.get("slot") == "bottom":
@@ -23,7 +26,7 @@ def region_styles(tree):
             declarations += ["width:100%", "min-height:100dvh"]
         rules.append(selector + "{" + ";".join(value + " !important" for value in declarations) + "}")
         for child in node.get("children", []):
-            visit(child)
+            visit(child, node.get("axis"))
 
     visit(tree)
     return "\n".join(rules)

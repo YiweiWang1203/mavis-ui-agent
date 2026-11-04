@@ -151,6 +151,9 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
                 "Show recognizable asset_content, using embedded SVG or local content when appropriate, "
                 "not generic empty or text-only image placeholders. Preserve supplied content and labels. "
                 "Avoid horizontal overflow and clipped controls. Do not use inline important layout styles. "
+                "Every marked tree child must be a direct DOM child of its marked tree parent. "
+                "Put any control wrapper on that same marked node, never between two tree nodes. "
+                "Cross-axis start/end/center uses content-sized width under a column or height under a row; stretch fills it. "
                 "The following tree-derived CSS is appended by the system; style around it and do not override it:\n"
                 + region_styles(region_tree))
     else:
@@ -193,10 +196,14 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
             raise ValueError("INCOMPLETE_HTML_DOCUMENT")
         if region_tree:
             from src.utils.region_tree import check_region_markup
-            check_region_markup(code, region_tree)
+            check_region_markup(code, region_tree, direct_parent=ui_state_json.get("page_meta", {}).get("contract_version") == 2)
             if ui_state_json.get("page_meta", {}).get("contract_version") == 2:
                 from src.utils.region_execution import attach_region_styles
+                from src.utils.pipeline_trace import trace_event
+                original_html = code
                 code = attach_region_styles(code, region_tree)
+                trace_event("coder.region_style_compilation", original_html=original_html,
+                            compiled_html=code, derived_css=region_styles(region_tree))
         trace_html_contract(code,ui_state_json,renderer='llm',
                     finish_reason=getattr(response.choices[0],'finish_reason',None))
 

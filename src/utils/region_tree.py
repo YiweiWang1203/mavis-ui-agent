@@ -116,7 +116,7 @@ def compile_region_tree(plan, segments, *, schema_version=1):
     return result
 
 
-def check_region_markup(code, tree):
+def check_region_markup(code, tree, *, direct_parent=False):
     """Check ID, nesting and order markers in the HTML before saving."""
     expected = []
 
@@ -139,7 +139,8 @@ def check_region_markup(code, tree):
             attrs = dict(attrs)
             key = attrs.get("data-ui-id")
             if key is not None:
-                parent = next((key for _, key in reversed(self.stack) if key is not None), None)
+                parent = (self.stack[-1][1] if self.stack else None) if direct_parent else next(
+                    (key for _, key in reversed(self.stack) if key is not None), None)
                 self.nodes.append((key, parent, attrs.get("data-ui-axis"), attrs.get("data-ui-slot")))
             if tag not in self.void_tags:
                 self.stack.append((tag, key))
