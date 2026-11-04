@@ -9,6 +9,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from src.renderers.region_bundle import RENDERER
+
 
 class CandidatePersistenceTests(unittest.TestCase):
     def run_candidate(self, html):
@@ -28,7 +30,7 @@ class CandidatePersistenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             namespace = {"__file__": str(source_path), "os": os, "json": json, "Path": Path,
                          "datetime": datetime, "logging": logging, "HTML_OUTPUT_DIR": Path(directory),
-                         "DEFAULT_CODER_MODEL": "test", "_get_openai_client": lambda: client,
+                         "DEFAULT_CODER_MODEL": "test", "RENDERER": RENDERER, "_get_openai_client": lambda: client,
                          "trace_html_contract": lambda *args, **kwargs: None}
             exec(compile(ast.Module(body=functions, type_ignores=[]), str(source_path), "exec"), namespace)
             with patch.dict(os.environ, {"UI_RENDERER_MODE": "llm", "UI_CODER_CONTRACT_MODE": "main_system_v1",
