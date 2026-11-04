@@ -1,0 +1,44 @@
+import unittest
+from src.utils.region_audit_input import observation_content, audit_plan_view, resolve_pointer
+from src.utils.region_diagnostics import region_diagnostics
+
+
+class AuditInputTests(unittest.TestCase):
+    def test_nested_geometry_removed_without_mutating_original(self):
+        original = {"elements": [{"id": "list", "bbox": {"x_min": .36},
+                    "items": [{"id": "row", "text": "entry", "bbox": {"x_min": .08}}],
+                    "items_source": {"source": "vision_response", "canvas": {"width": 400}}}]}
+        projected = observation_content(original)
+        self.assertNotIn("bbox", str(projected))
+        self.assertNotIn("canvas", str(projected))
+        self.assertEqual(projected["elements"][0]["items"][0]["id"], "row")
+        self.assertIn("bbox", original["elements"][0])
+        plan_view = audit_plan_view(original)
+        self.assertNotIn("bbox", plan_view["elements"][0]["items"][0])
+
+    def test_pointer_paths_and_missing_parent_location(self):
+        plan = {"region_tree": {"children": []}, "a/b": {"~key": 3}}
+        self.assertEqual(resolve_pointer(plan, "/region_tree/children"), [])
+        self.assertEqual(resolve_pointer(plan, "/a~1b/~0key"), 3)
+        for path in ("/region_tree/children/0", "/missing", "/a~2b", "wrong"):
+            with self.assertRaises(ValueError):
+                resolve_pointer(plan, path)
+
+    def test_independent_errors_collected_together(self):
+        plan = {
+            "page_meta": {"viewport": {"width": 800, "height": 600}},
+            "elements": [{"id": "field", "type": "input", "origin": "speech"},
+                         {"id": "omitted", "type": "image", "origin": "vision"}],
+            "region_tree": {"id": "page", "axis": "row", "children": [
+                {"id": "field", "slot": "bottom"}]},
+            "requirements": [{"sources": ["s1"], "intent": "a supported requirement",
+                              "certainty": "explicit", "status": "bound",
+                              "scope": "region", "targets": [], "references": []}],
+            "actions": [{"sources": ["s1"], "target": "nested_row",
+                         "trigger": "select", "state_change": "open", "observable_result": "details"}]}
+        errors = region_diagnostics(plan, {"s1": {"text": "source"}})
+        paths = {error["path"] for error in errors}
+        self.assertEqual(paths, {"/region_tree/children/0/slot", "/region_tree",
+                                 "/requirements/0/scope", "/requirements/0/targets",
+                                 "/actions/0/target"})
+        self.assertEqual(plan["region_tree"]["axis"], "row")

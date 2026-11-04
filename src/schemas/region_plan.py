@@ -21,8 +21,8 @@ class Requirement(Contract):
     intent: str = Field(min_length=1)
     certainty: Literal["explicit", "inferred", "conflicting"]
     status: Literal["bound", "unknown"]
-    scope: str | None
-    targets: list[str]
+    scope: str | None = Field(description="Existing region ID, including page, or null. Never the literal word region unless that ID exists.")
+    targets: list[str] = Field(description="Existing tree IDs; nonempty for bound, empty for unknown.")
     references: list[str]
 
 
@@ -40,7 +40,7 @@ class Element(Contract):
 
 class Action(Contract):
     sources: list[str] = Field(min_length=1)
-    target: str
+    target: str = Field(description="Top-level elements inventory ID. For repeated rows target the list control, describing row behavior in trigger; nested items IDs alone are not action targets.")
     trigger: str = Field(min_length=1)
     state_change: str = Field(min_length=1)
     observable_result: str = Field(min_length=1)
@@ -48,7 +48,7 @@ class Action(Contract):
 
 class Placement(Contract):
     id: str = Field(min_length=1)
-    slot: Literal["bottom"] | None = None
+    slot: Literal["bottom"] | None = Field(default=None, description="Only on the final child of a column parent. Never on the root or under a row.")
     cross_align: Literal["start", "end", "center", "stretch"] | None = None
     grow: bool = False
 

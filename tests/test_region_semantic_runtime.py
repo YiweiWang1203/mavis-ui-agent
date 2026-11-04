@@ -43,7 +43,8 @@ class SemanticRuntimeTests(unittest.TestCase):
     def test_unknown_does_not_pass(self):
         unresolved = {"verdict": "unresolved", "issues": [{
             "sources": [], "vision_ids": ["item"], "objects": ["item"],
-            "expected": "unclear content", "actual": "ambiguous", "certainty": "unknown"}]}
+            "plan_path": "/elements/0", "expected_relation": "unclear content",
+            "actual_structure": "ambiguous", "certainty": "unknown"}]}
         with self.assertRaisesRegex(ValueError, "SEMANTIC_AUDIT_UNRESOLVED"):
             self.exercise(PLAN, [unresolved])
 

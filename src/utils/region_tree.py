@@ -19,7 +19,12 @@ def speech_segments(speech):
 
 def compile_region_tree(plan, segments, *, schema_version=1):
     if schema_version == 2:
+        import json
         from src.schemas.region_plan import RegionPlan
+        from src.utils.region_diagnostics import region_diagnostics
+        diagnostics = region_diagnostics(plan, segments)
+        if diagnostics:
+            raise ValueError("REGION_CONTRACT_INVALID: " + json.dumps(diagnostics, ensure_ascii=False))
         plan = RegionPlan.model_validate(plan).model_dump(exclude_none=True)
     def require(condition, path):
         if not condition:
