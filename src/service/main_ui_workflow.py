@@ -122,11 +122,8 @@ def build_main_ui_graph(output, *, start_at_architect=False):
 
 def run_source_binding_pair(state, output, run_id, dispatch=None):
     from src.graph import nodes
-    from src.service.main_model_runtime import (
-        MainModelRuntime, SOURCE_BINDING_ARM_PROFILE, SOURCE_BINDING_UPSTREAM_PROFILE,
-    )
+    from src.service.main_model_runtime import MainModelRuntime, SOURCE_BINDING_UPSTREAM_PROFILE
     from src.service.source_relations import bind_relations, extract_relations
-    from src.utils.pipeline_trace import trace_event
     from src.utils.region_tree import speech_segments
 
     upstream = output / 'upstream'
@@ -154,35 +151,43 @@ def run_source_binding_pair(state, output, run_id, dispatch=None):
                            'status': 'READY' if binding is not None else 'FAILED_' + stage.upper()}}
     save(upstream / 'terminal.json', result['upstream'])
     for name in ('control', 'candidate'):
-        folder = output / name
-        folder.mkdir()
-        arm = {'status': 'NO_HTML', 'model_calls': [], 'html_generated': False}
-        if extraction is None or (name == 'candidate' and binding is None):
-            arm['status'] = 'BLOCKED_BY_UPSTREAM'
-        else:
-            os.environ['MAVIS_MAIN_RUN_ID'] = run_id + '_' + name
-            inputs = deepcopy(shared)
-            evidence = deepcopy(extraction)
-            if name == 'candidate':
-                evidence['id_links'] = binding['id_links']
-            inputs['source_relation_evidence'] = evidence
-            trace_event('source_binding.arm_started', arm=name)
-            with MainModelRuntime(folder / 'requests', dispatch, profile=SOURCE_BINDING_ARM_PROFILE) as runtime:
-                final = build_main_ui_graph(folder, start_at_architect=True).invoke(inputs)
-                save(folder / 'final_state.json', final)
-            arm.update(model_calls=list(runtime.used), failed_node=final.get('failed_node'), review=final.get('review'))
-            if (final.get('review') or {}).get('html_persisted'):
-                artifact = folder / 'final.html'
-                with Path(final['final_code_path']).open('rb') as source, artifact.open('xb') as target:
-                    shutil.copyfileobj(source, target)
-                arm.update(status='HTML_GENERATED_PENDING_BROWSER_ACCEPTANCE', html_generated=True,
-                           html_path=str(artifact), html_sha256=sha(artifact),
-                           html_contract_passed=final['review'].get('html_contract_passed'))
-                if arm['html_contract_passed'] is False:
-                    arm['status'] = 'HTML_CONTRACT_FAILED_PENDING_BROWSER_ACCEPTANCE'
-        save(folder / 'terminal.json', arm)
-        result[name] = arm
+        arm_binding = binding if name == 'candidate' else None
+        arm_extraction = None if name == 'candidate' and binding is None else extraction
+        result[name] = run_source_binding_arm(shared, output / name, run_id, arm_extraction, arm_binding, dispatch)
     return result
+
+
+def run_source_binding_arm(shared, folder, run_id, extraction, binding=None, dispatch=None):
+    from src.service.main_model_runtime import MainModelRuntime, SOURCE_BINDING_ARM_PROFILE
+    from src.utils.pipeline_trace import trace_event
+
+    folder.mkdir()
+    arm = {'status': 'NO_HTML', 'model_calls': [], 'html_generated': False}
+    if extraction is None:
+        arm['status'] = 'BLOCKED_BY_UPSTREAM'
+    else:
+        os.environ['MAVIS_MAIN_RUN_ID'] = run_id + '_' + folder.name
+        inputs = deepcopy(shared)
+        evidence = deepcopy(extraction)
+        if binding is not None:
+            evidence['id_links'] = binding['id_links']
+        inputs['source_relation_evidence'] = evidence
+        trace_event('source_binding.arm_started', arm=folder.name)
+        with MainModelRuntime(folder / 'requests', dispatch, profile=SOURCE_BINDING_ARM_PROFILE) as runtime:
+            final = build_main_ui_graph(folder, start_at_architect=True).invoke(inputs)
+            save(folder / 'final_state.json', final)
+        arm.update(model_calls=list(runtime.used), failed_node=final.get('failed_node'), review=final.get('review'))
+        if (final.get('review') or {}).get('html_persisted'):
+            artifact = folder / 'final.html'
+            with Path(final['final_code_path']).open('rb') as source, artifact.open('xb') as target:
+                shutil.copyfileobj(source, target)
+            arm.update(status='HTML_GENERATED_PENDING_BROWSER_ACCEPTANCE', html_generated=True,
+                       html_path=str(artifact), html_sha256=sha(artifact),
+                       html_contract_passed=final['review'].get('html_contract_passed'))
+            if arm['html_contract_passed'] is False:
+                arm['status'] = 'HTML_CONTRACT_FAILED_PENDING_BROWSER_ACCEPTANCE'
+    save(folder / 'terminal.json', arm)
+    return arm
 
 
 def run_main_video(*, video_path, user_prompt, output_dir, run_id,

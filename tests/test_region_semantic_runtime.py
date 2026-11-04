@@ -11,7 +11,7 @@ from src.service.main_model_runtime import (
     MainModelRuntime, MODEL, REGION_V2_NO_REVIEW_PROFILE, SOURCE_BINDING_ARM_PROFILE,
     SOURCE_BINDING_UPSTREAM_PROFILE, note_vision_repair,
 )
-from src.service.source_relations import bind_relations
+from src.service.source_relations import IDENTITY_FIELDS, bind_relations, keyed_relations, validate_relation_links
 from src.utils.pipeline_trace import PipelineTrace
 from src.utils.region_tree import compile_region_tree
 
@@ -51,13 +51,16 @@ class SemanticRuntimeTests(unittest.TestCase):
                                     "subject": "plus", "reference": "input", "frame": "local",
                                     "relation": "inside", "certainty": "explicit"}]}
         vision = {"elements": [{"id": "plus", "text": "plus"}, {"id": "input"}, {"id": "input"}]}
-        raw = {"links": [{"relation_index": 0, "subject_id": "plus", "reference_id": "input",
+        keyed = keyed_relations(relations)
+        key = next(iter(keyed))
+        identity = {field: keyed[key][field] for field in IDENTITY_FIELDS}
+        raw = {"links": [{"relation_key": key, **identity, "subject_id": "plus", "reference_id": "input",
                           "subject_basis": "exact observed label", "reference_basis": "duplicate object"}]}
 
         def dispatch(request, **kwargs):
             if "messages" in request:
                 payload = json.loads(request["messages"][1]["content"])
-                self.assertEqual(payload, {"relation_records": relations, "asr_segments": numbered,
+                self.assertEqual(payload, {"relation_records_by_key": keyed, "asr_segments": numbered,
                                            "observed_objects": [{"id": "plus", "text": "plus"}]})
             return {"ok": True, "response": {"choices": [
                 {"finish_reason": "stop", "message": {"content": json.dumps(raw)}}]}}
@@ -72,7 +75,8 @@ class SemanticRuntimeTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "MAIN_STAGE_ORDER_VIOLATION"):
                     runtime.create("architect", model=MODEL)
                 value = bind_relations(relations, numbered, vision)
-                self.assertEqual(value["id_links"], [{"relation_index": 0, "subject_id": "plus", "reference_id": None}])
+                self.assertEqual(value["id_links"], [{"relation_key": key, "source_id": "s1", **identity,
+                                                      "subject_id": "plus", "reference_id": None}])
                 self.assertEqual(value["raw_links"], raw)
                 self.assertEqual(value["rejected_links"][0]["reason"], "NON_UNIQUE_OR_MISSING_ID")
                 self.assertEqual(len(runtime.used), 4)
@@ -84,6 +88,49 @@ class SemanticRuntimeTests(unittest.TestCase):
                             runtime.create(stage, model=MODEL)
                     runtime.create("coder", model=MODEL)
                     self.assertEqual(runtime.used, ["architect", "coder"])
+
+    def test_relation_keys_reject_shifted_identity_and_isolate_invalid_rows(self):
+        numbered = {"s7": "Input at bottom, plus at lower left, microphone at right, send at lower right."}
+        base = {"source_id": "s7", "source_quote": numbered["s7"], "reference": "input",
+                "frame": "local", "certainty": "explicit"}
+        records = {"relations": [base | {"subject": subject, "relation": relation} for subject, relation in (
+            ("input", "bottom"), ("plus", "lower left"), ("microphone", "right"), ("send", "lower right"))]}
+        original = deepcopy(records)
+        keyed = keyed_relations(records)
+        keys = list(keyed)
+        objects = {"input": 1, "plus": 1, "microphone": 1, "send": 1}
+
+        def row(key, record):
+            return {"relation_key": key, **{field: record[field] for field in IDENTITY_FIELDS},
+                    "subject_id": record["subject"], "reference_id": "input",
+                    "subject_basis": "observed", "reference_basis": "observed"}
+
+        # Mirrors the archived shift: the correct plus pair appears under the previous relationship.
+        shifted = {"links": [row(key, record) for key, record in zip(keys, records["relations"][1:])]}
+        result = validate_relation_links(shifted, keyed, numbered, objects)
+        self.assertEqual([e["reason"] for e in result["rejected_links"]],
+                         ["RELATION_IDENTITY_MISMATCH"] * 3 + ["MISSING_LINK"])
+        self.assertEqual(result["counts"], {"expected": 4, "returned_rows": 3, "covered_keys": 3,
+                                            "identity_verified": 0, "structurally_bound": 0, "unknown": 4})
+        self.assertTrue(all(link["subject_id"] is None and link["reference_id"] is None
+                            for link in result["id_links"]))
+
+        valid = [row(key, record) for key, record in reversed(list(keyed.items()))]
+        reordered = validate_relation_links({"links": valid}, keyed, numbered, objects)
+        self.assertEqual([link["relation_key"] for link in reordered["id_links"]], keys)
+        self.assertEqual(reordered["counts"]["structurally_bound"], 4)
+        contaminated = validate_relation_links(
+            {"links": valid + [valid[0], valid[1] | {"relation_key": "unknown"}]}, keyed, numbered, objects)
+        self.assertEqual({e["reason"] for e in contaminated["rejected_links"]},
+                         {"DUPLICATE_RELATION_KEY", "UNKNOWN_RELATION_KEY"})
+        self.assertEqual(contaminated["counts"]["structurally_bound"], 3)
+        self.assertEqual(records, original)
+
+        repeated = {"relations": [*records["relations"], deepcopy(records["relations"][0])]}
+        repeated_keys = keyed_relations(repeated)
+        self.assertEqual(list(repeated_keys)[:-1], keys)
+        self.assertEqual(list(repeated_keys)[-1], keys[0].removesuffix("-1") + "-2")
+        self.assertEqual(list(repeated_keys.values()), repeated["relations"])
 
     @patch.dict("os.environ", {"UI_STRUCTURE_MODE": "region_tree_v1", "UI_REGION_REVIEW_MODE": "semantic7",
                               "UI_REGION_AUDIT_POLICY": "shadow", "CODER_PROD_MODEL": MODEL})

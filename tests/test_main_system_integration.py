@@ -218,6 +218,7 @@ def test_source_binding_pair_shares_vision_and_only_adds_id_links(tmp_path, monk
     import src.graph as graph_package
     from src.agents.ui_architect import generate_ui_state
     from src.service.main_ui_workflow import run_source_binding_pair
+    from src.service.source_relations import IDENTITY_FIELDS, keyed_relations
 
     for key, value in {"UI_STRUCTURE_MODE": "region_tree_v1", "UI_REGION_REVIEW_MODE": "semantic7",
                        "UI_REGION_AUDIT_POLICY": "shadow", "CODER_PROD_MODEL": MODEL}.items():
@@ -227,7 +228,9 @@ def test_source_binding_pair_shares_vision_and_only_adds_id_links(tmp_path, monk
     relations = {"relations": [{"source_id": "s1", "source_quote": "Put plus by the input.",
                                 "subject": "plus", "reference": "input", "frame": "local",
                                 "relation": "by", "certainty": "explicit"}]}
-    raw_links = {"links": [{"relation_index": 0, "subject_id": "plus", "reference_id": "input",
+    key, = keyed_relations(relations)
+    identity = {field: relations["relations"][0][field] for field in IDENTITY_FIELDS}
+    raw_links = {"links": [{"relation_key": key, **identity, "subject_id": "plus", "reference_id": "input",
                             "subject_basis": "observed label", "reference_basis": "observed label"}]}
     plan = {"page_meta": {"viewport": {"width": 800, "height": 600}}, "requirements": [], "actions": [],
             "elements": [{"id": "plus", "type": "button", "origin": "vision"}],
@@ -268,7 +271,8 @@ def test_source_binding_pair_shares_vision_and_only_adds_id_links(tmp_path, monk
                           for arm in ("control", "candidate")]
     section = "\n\n[Source Relation Evidence]\n"
     baseline, control_evidence = control["messages"][1]["content"].split(section)
-    expected = relations | {"id_links": [{"relation_index": 0, "subject_id": "plus", "reference_id": "input"}]}
+    expected = relations | {"id_links": [{"relation_key": key, "source_id": "s1", **identity,
+                                          "subject_id": "plus", "reference_id": "input"}]}
     assert json.loads(control_evidence) == relations
     control["messages"][1]["content"] = baseline + section + json.dumps(expected, ensure_ascii=False)
     assert candidate == control
