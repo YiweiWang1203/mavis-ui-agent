@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from src.service.direct_multimodal_baseline import save_direct_html
+from src.service.direct_multimodal_baseline import ASSET_RULES, DIRECT_ASSET_POLICY, save_direct_html
 from src.service.main_model_runtime import DIRECT_MULTIMODAL_PROFILE, MODEL, MainModelRuntime
 from src.service.main_ui_workflow import run_main_video
 
@@ -55,6 +55,7 @@ def test_video_service_dispatches_frame_and_saves_only_complete_html(tmp_path, m
         assert request["model"] == MODEL
         assert request["max_tokens"] == 8192 and request["timeout"] == 600
         assert "response_format" not in request
+        assert request["messages"][0]["content"].endswith(ASSET_RULES)
         text, image = request["messages"][1]["content"]
         assert json.loads(text["text"]) == {
             "asr_transcript": transcript, "original_user_request": original_request,
@@ -126,4 +127,36 @@ def test_exact_envelope_bytes_and_offsets(tmp_path):
 def test_rejects_incomplete_and_ambiguous_envelopes(tmp_path, raw, finish):
     with pytest.raises(ValueError, match="DIRECT_BASELINE_"):
         save_direct_html(raw, finish, tmp_path)
+    assert not (tmp_path / "final.html").exists()
+
+
+def test_catalog_expands_only_the_exact_references(tmp_path):
+    marker = '<span data-ui-icon="location"></span>'
+    html = HTML.replace("<input>", '<button class="x" aria-label="位置">' + marker + "</button><input>")
+    result = save_direct_html(html, "stop", tmp_path, compact_assets=True)
+    rendered = (tmp_path / "final.html").read_bytes()
+    assert rendered.count(b"<svg ") == 1
+    assert b'width="1em" height="1em"' in rendered
+    import re
+    assert re.sub(rb"<svg [^>]*>.*?</svg>", b"", rendered) == html.encode("utf-8")
+    assert result["expanded_icons"] == ["location"]
+    assert result["model_html_sha256"] == hashlib.sha256(html.encode("utf-8")).hexdigest()
+    assert result["html_sha256"] == hashlib.sha256(rendered).hexdigest()
+    assert DIRECT_ASSET_POLICY in ASSET_RULES
+
+
+@pytest.mark.parametrize(("markup", "error"), [
+    ('<span data-ui-icon="unknown"></span>', "UNKNOWN_ICON"),
+    ('<span data-ui-icon="location"><b>x</b></span>', "ICON_REFERENCE"),
+    ('<span data-ui-icon="location" onclick="x()"></span>', "ICON_REFERENCE"),
+    ('<span data-ui-icon="location">', "ICON_REFERENCE"),
+    ('<svg><path d="M0 0"/></svg>', "AUTHORED_VECTOR"),
+    ('<style>.icon path{d:"M0 0 0.01 0.02"}</style>', "CSS_VECTOR_DATA"),
+    (r'<style>.icon {\64 :path("M0 0")}</style>', "CSS_VECTOR_DATA"),
+    ('<img src="data:image/png;base64,A">', "OPAQUE_ASSET"),
+    ('<script>let x="<svg></svg>"</script>', "AUTHORED_VECTOR"),
+])
+def test_catalog_rejects_authored_or_malformed_assets(tmp_path, markup, error):
+    with pytest.raises(ValueError, match=error):
+        save_direct_html(HTML.replace("<input>", markup), "stop", tmp_path, compact_assets=True)
     assert not (tmp_path / "final.html").exists()
