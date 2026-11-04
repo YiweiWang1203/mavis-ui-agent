@@ -352,6 +352,9 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
                       image_data_url: str | None = None, *, attach_observation_image: bool = False,
                       asr_transcript: str = "", source_relation_evidence: dict | None = None) -> dict:
     """Fuse user intent and validated vision data into a UI-State JSON contract."""
+    from src.service.main_model_runtime import semantic_layout_enabled
+
+    semantic_layout = semantic_layout_enabled()
     structure_mode = os.getenv('UI_STRUCTURE_MODE', 'baseline')
     if structure_mode not in {'baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1','region_tree_v1'}:
         raise ValueError('Unsupported structure mode')
@@ -360,7 +363,12 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
         from src.utils.region_tree import compile_region_tree, speech_segments
         system_prompt = (Path(__file__).resolve().parents[1] / 'prompts/ui_architect_region_tree.md').read_text(encoding='utf-8')
         segments = speech_segments(asr_transcript)
-        if os.getenv("UI_REGION_REVIEW_MODE") == "semantic7":
+        if semantic_layout:
+            from src.utils.semantic_page_plan import parse_semantic_json
+            from src.utils.single_semantic_layout import SemanticLayout, compile_semantic_layout
+            system_prompt = (Path(__file__).resolve().parents[1] / 'prompts/ui_architect_single_semantic_layout.md').read_text(encoding='utf-8')
+            system_prompt += "\nExecutable JSON schema:\n" + json.dumps(SemanticLayout.model_json_schema())
+        elif os.getenv("UI_REGION_REVIEW_MODE") == "semantic7":
             from src.schemas.region_plan import RegionPlan
             system_prompt = (Path(__file__).resolve().parents[1] / 'prompts/ui_architect_region_semantic.md').read_text(encoding='utf-8')
             system_prompt += "\nShared executable JSON schema:\n" + json.dumps(RegionPlan.model_json_schema())
@@ -451,15 +459,19 @@ Return the final fused UI-State JSON.
 
         raw_json_str = response.choices[0].message.content
         try:
-            ui_state = json.loads(raw_json_str)
+            ui_state = parse_semantic_json(raw_json_str) if semantic_layout else json.loads(raw_json_str)
         except json.JSONDecodeError:
-            if structure_mode != 'region_tree_v1' or os.getenv("UI_REGION_REVIEW_MODE") != "semantic7":
+            if semantic_layout or structure_mode != 'region_tree_v1' or os.getenv("UI_REGION_REVIEW_MODE") != "semantic7":
                 raise
             ui_state = raw_json_str
         trace_event('architect.model_parsed',output=ui_state)
         if structure_mode == 'region_tree_v1':
             try:
-                if os.getenv("UI_REGION_REVIEW_MODE") == "semantic7":
+                if semantic_layout:
+                    compiled, provenance = compile_semantic_layout(ui_state, segments, user_intent)
+                    trace_event('architect.single_semantic_layout_compiled', provenance=provenance,
+                                region_tree=compiled["region_tree"])
+                elif os.getenv("UI_REGION_REVIEW_MODE") == "semantic7":
                     from src.service.main_model_runtime import architect_review_enabled
                     if architect_review_enabled():
                         from src.agents.region_review import review_region_plan

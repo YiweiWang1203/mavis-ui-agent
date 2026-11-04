@@ -12,6 +12,10 @@ REGION_V2_NO_REVIEW_PROFILE = "region_v2_no_review4"
 SOURCE_BINDING_UPSTREAM_PROFILE = "source_binding_upstream4"
 SOURCE_BINDING_ARM_PROFILE = "source_binding_arm2"
 SOURCE_BINDING_RECOVERY_PROFILE = "source_binding_recovery1"
+SEMANTIC_LAYOUT_UPSTREAM_PROFILE = "single_semantic_layout_upstream2"
+SEMANTIC_LAYOUT_ARM_PROFILES = {
+    "control": "single_semantic_layout_control2", "candidate": "single_semantic_layout_candidate2",
+}
 
 
 def main_client(stage):
@@ -23,7 +27,13 @@ def architect_review_enabled():
     runtime = ACTIVE.get()
     return runtime is None or runtime.profile not in {
         "source_relation_arm2", REGION_V2_NO_REVIEW_PROFILE, SOURCE_BINDING_ARM_PROFILE,
+        *SEMANTIC_LAYOUT_ARM_PROFILES.values(),
     }
+
+
+def semantic_layout_enabled():
+    runtime = ACTIVE.get()
+    return runtime is not None and runtime.profile == SEMANTIC_LAYOUT_ARM_PROFILES["candidate"]
 
 
 def note_rejected_architect_repair(diagnostic):
@@ -50,7 +60,8 @@ class MainModelRuntime:
                   "repair_probe_control1": 1, "repair_probe_feedback2": 2,
                   "source_relation_extract1": 1, "source_relation_arm2": 2,
                   SOURCE_BINDING_UPSTREAM_PROFILE: 4, SOURCE_BINDING_ARM_PROFILE: 2,
-                  SOURCE_BINDING_RECOVERY_PROFILE: 1}
+                  SOURCE_BINDING_RECOVERY_PROFILE: 1, SEMANTIC_LAYOUT_UPSTREAM_PROFILE: 2,
+                  **dict.fromkeys(SEMANTIC_LAYOUT_ARM_PROFILES.values(), 2)}
         if profile not in limits:
             raise ValueError("UNKNOWN_RUNTIME_PROFILE")
         self.profile = profile
@@ -98,8 +109,11 @@ class MainModelRuntime:
             allowed = {"source_relation_extract"}
         elif self.profile == SOURCE_BINDING_RECOVERY_PROFILE:
             allowed = {"source_relation_bind"}
-        elif self.profile in {"source_relation_arm2", SOURCE_BINDING_ARM_PROFILE}:
+        elif self.profile in {"source_relation_arm2", SOURCE_BINDING_ARM_PROFILE, *SEMANTIC_LAYOUT_ARM_PROFILES.values()}:
             allowed = {"coder"} if self.used else {"architect"}
+        elif self.profile == SEMANTIC_LAYOUT_UPSTREAM_PROFILE:
+            allowed = {"vision"} if not self.used or (
+                self.used == ["vision_initial"] and self.repair_reason is not None) else set()
         elif self.profile == SOURCE_BINDING_UPSTREAM_PROFILE:
             if not self.used or (self.used == ["vision_initial"] and self.repair_reason is not None):
                 allowed = {"vision"}

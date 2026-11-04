@@ -158,22 +158,49 @@ def run_source_binding_pair(state, output, run_id, dispatch=None):
 
 
 def run_source_binding_arm(shared, folder, run_id, extraction, binding=None, dispatch=None):
-    from src.service.main_model_runtime import MainModelRuntime, SOURCE_BINDING_ARM_PROFILE
-    from src.utils.pipeline_trace import trace_event
-
-    folder.mkdir()
-    arm = {'status': 'NO_HTML', 'model_calls': [], 'html_generated': False}
-    if extraction is None:
-        arm['status'] = 'BLOCKED_BY_UPSTREAM'
-    else:
-        os.environ['MAVIS_MAIN_RUN_ID'] = run_id + '_' + folder.name
+    from src.service.main_model_runtime import SOURCE_BINDING_ARM_PROFILE
+    inputs = None
+    if extraction is not None:
         inputs = deepcopy(shared)
         evidence = deepcopy(extraction)
         if binding is not None:
             evidence['id_links'] = binding['id_links']
         inputs['source_relation_evidence'] = evidence
-        trace_event('source_binding.arm_started', arm=folder.name)
-        with MainModelRuntime(folder / 'requests', dispatch, profile=SOURCE_BINDING_ARM_PROFILE) as runtime:
+    return run_planner_arm(inputs, folder, run_id, SOURCE_BINDING_ARM_PROFILE, dispatch,
+                           trace_label='source_binding.arm_started')
+
+
+def run_semantic_layout_pair(state, output, run_id, dispatch=None):
+    from src.graph import nodes
+    from src.service.main_model_runtime import (
+        MainModelRuntime, SEMANTIC_LAYOUT_ARM_PROFILES, SEMANTIC_LAYOUT_UPSTREAM_PROFILE,
+    )
+
+    upstream = output / 'upstream'
+    upstream.mkdir()
+    with MainModelRuntime(upstream / 'requests', dispatch, profile=SEMANTIC_LAYOUT_UPSTREAM_PROFILE) as runtime:
+        shared = wrap_main_node(upstream, 'vision', nodes.vision_node)(state)
+    ready = (shared.get('vision_status') or {}).get('valid') and not shared.get('failed_node')
+    result = {'upstream': {'model_calls': list(runtime.used), 'status': 'READY' if ready else 'FAILED_VISION'}}
+    save(upstream / 'terminal.json', result['upstream'])
+    for name, profile in SEMANTIC_LAYOUT_ARM_PROFILES.items():
+        result[name] = run_planner_arm(deepcopy(shared) if ready else None, output / name, run_id,
+                                       profile, dispatch, trace_label='single_semantic_layout.arm_started')
+    return result
+
+
+def run_planner_arm(inputs, folder, run_id, profile, dispatch, *, trace_label):
+    from src.service.main_model_runtime import MainModelRuntime
+    from src.utils.pipeline_trace import trace_event
+
+    folder.mkdir()
+    arm = {'status': 'NO_HTML', 'model_calls': [], 'html_generated': False}
+    if inputs is None:
+        arm['status'] = 'BLOCKED_BY_UPSTREAM'
+    else:
+        os.environ['MAVIS_MAIN_RUN_ID'] = run_id + '_' + folder.name
+        trace_event(trace_label, arm=folder.name)
+        with MainModelRuntime(folder / 'requests', dispatch, profile=profile) as runtime:
             final = build_main_ui_graph(folder, start_at_architect=True).invoke(inputs)
             save(folder / 'final_state.json', final)
         arm.update(model_calls=list(runtime.used), failed_node=final.get('failed_node'), review=final.get('review'))
@@ -192,7 +219,7 @@ def run_source_binding_arm(shared, folder, run_id, extraction, binding=None, dis
 
 def run_main_video(*, video_path, user_prompt, output_dir, run_id,
                    rotate_degrees=180, image_path=None, preferred_locale='auto', region_v2_no_review=False,
-                   source_binding_pair=False):
+                   source_binding_pair=False, single_semantic_layout_pair=False):
     config_path = ROOT / 'config/main_ui.json'
     config = json.loads(config_path.read_text(encoding='utf-8'))
     profile = config.get("runtime_profile", "baseline4")
@@ -204,18 +231,28 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
     if (config.get('max_physical_requests_per_case'), config.get('max_output_tokens'),
         config.get('timeout_seconds'), config.get('automatic_retries'), config.get('enable_asr')) != (request_limit, 8192, 600, 0, True):
         raise ValueError('UNSUPPORTED_MAIN_BUDGET_CONFIG')
-    if region_v2_no_review or source_binding_pair:
+    if sum((region_v2_no_review, source_binding_pair, single_semantic_layout_pair)) > 1:
+        raise ValueError("CONFLICTING_MAIN_EXPERIMENTS")
+    pair_runner = None
+    if region_v2_no_review or source_binding_pair or single_semantic_layout_pair:
         if profile != "semantic7" or config['environment'].get('UI_STRUCTURE_MODE') != "region_tree_v1":
             raise ValueError("NO_REVIEW_REQUIRES_REGION_V2_PLANNER")
         from src.service.main_model_runtime import REGION_V2_NO_REVIEW_PROFILE
         profile = REGION_V2_NO_REVIEW_PROFILE
         config.update(runtime_profile=profile, max_physical_requests_per_case=4)
     if source_binding_pair:
+        pair_runner = run_source_binding_pair
         from src.service.main_model_runtime import SOURCE_BINDING_ARM_PROFILE, SOURCE_BINDING_UPSTREAM_PROFILE
         config.update(runtime_profile="source_binding_pair8", max_physical_requests_per_case=8,
                       request_partitions={"upstream": SOURCE_BINDING_UPSTREAM_PROFILE,
                                           "control": SOURCE_BINDING_ARM_PROFILE, "candidate": SOURCE_BINDING_ARM_PROFILE})
         config['environment']['UI_REGION_PLAN_NORMALIZATION'] = ''
+    if single_semantic_layout_pair:
+        from src.service.main_model_runtime import SEMANTIC_LAYOUT_ARM_PROFILES, SEMANTIC_LAYOUT_UPSTREAM_PROFILE
+        pair_runner = run_semantic_layout_pair
+        config.update(runtime_profile="single_semantic_layout_pair6", max_physical_requests_per_case=6,
+                      request_partitions={"upstream": SEMANTIC_LAYOUT_UPSTREAM_PROFILE, **SEMANTIC_LAYOUT_ARM_PROFILES})
+        config['environment']['UI_REGION_PLAN_NORMALIZATION'] = 'row_bottom_alias_v1'
     output = Path(output_dir).resolve()
     output.mkdir(parents=True, exist_ok=False)
     from dotenv import load_dotenv
@@ -244,7 +281,7 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
         from src.utils.pipeline_trace import PipelineTrace
         from src.service.input_adapter import prepare_workflow_input
         from langchain_core.messages import HumanMessage
-        runtime_context = nullcontext() if source_binding_pair else MainModelRuntime(output / 'requests', profile=profile)
+        runtime_context = nullcontext() if pair_runner else MainModelRuntime(output / 'requests', profile=profile)
         with PipelineTrace(output / 'trace', terminal), runtime_context as runtime:
             prepared = prepare_workflow_input(text=user_prompt, video_path=video_path, image_path=image_path,
                 preprocess_output_dir=str(output / 'preprocess'), rotate_degrees=rotate_degrees,
@@ -254,8 +291,8 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
             if preferred_locale != 'auto':
                 state['preferred_locale'] = preferred_locale
             state['messages'] = [HumanMessage(content=m['content']) for m in state['messages']]
-            if source_binding_pair:
-                paired = run_source_binding_pair(state, output, run_id)
+            if pair_runner:
+                paired = pair_runner(state, output, run_id)
                 terminal['pair'] = paired
                 terminal['model_calls'] = [f"{part}:{slot}" for part, row in paired.items() for slot in row['model_calls']]
                 terminal['html_generated'] = all(paired[name]['html_generated'] for name in ('control', 'candidate'))
@@ -301,7 +338,7 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
     finally:
         if runtime is not None:
             terminal['model_calls'] = list(runtime.used)
-        request_records = (output.glob('*/requests/*_terminal.json') if source_binding_pair
+        request_records = (output.glob('*/requests/*_terminal.json') if pair_runner
                            else (output / 'requests').glob('*_terminal.json'))
         terminal['request_records'] = [str(path.relative_to(output)) for path in sorted(request_records)]
         for key, value in before.items():
