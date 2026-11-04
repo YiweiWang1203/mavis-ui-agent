@@ -83,6 +83,8 @@ def build_main_ui_graph(output):
         persisted = bool(code and isinstance(path, str) and Path(path).is_file()
                          and Path(path).read_text(encoding='utf-8') == code)
         state['review'] = {'reviewer': 'local_artifact_and_structure_audit',
+            'renderer': state.get('final_renderer'),
+            'semantic_audit_policy': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_audit_policy'),
             'semantic_model_review': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_review'),
             'plan_selection': (state.get('ui_state_json') or {}).get('page_meta', {}).get('plan_selection'),
             'semantic_model_passed': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_review_passed'),
@@ -172,6 +174,11 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
                 path = Path(final['final_code_path']).resolve()
                 terminal.update(status='HTML_GENERATED_PENDING_BROWSER_ACCEPTANCE', html_path=str(path), html_sha256=sha(path))
                 terminal['html_contract_passed'] = final.get('review', {}).get('html_contract_passed')
+                terminal['renderer'] = final.get('final_renderer')
+                if terminal['renderer'] == 'region_bundle_v1':
+                    bundle_response = output / 'requests/coder_response.json'
+                    terminal['raw_bundle_response_path'] = str(bundle_response)
+                    terminal['raw_bundle_response_sha256'] = sha(bundle_response)
                 if terminal['html_contract_passed'] is False:
                     terminal['status'] = 'HTML_CONTRACT_FAILED_PENDING_BROWSER_ACCEPTANCE'
                 raw_path = final.get('raw_candidate_path')
@@ -180,7 +187,8 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
                     terminal['raw_html_sha256'] = sha(raw_path)
                 save(path.parent / 'source_manifest.json', {k: terminal[k] for k in (
                     'run_id', 'commit', 'input_video', 'input_video_sha256', 'config_sha256', 'html_path', 'html_sha256',
-                    'html_contract_passed', 'raw_html_path', 'raw_html_sha256') if k in terminal})
+                    'html_contract_passed', 'renderer', 'raw_bundle_response_path',
+                    'raw_bundle_response_sha256', 'raw_html_path', 'raw_html_sha256') if k in terminal})
             else:
                 terminal.update(status='NO_HTML', failed_node=final.get('failed_node'),
                     node_error_type=final.get('node_error_type'), vision_status=final.get('vision_status'),

@@ -35,10 +35,11 @@ def note_vision_repair(feedback):
 
 class MainModelRuntime:
     def __init__(self, output, dispatch=None, *, profile="baseline4"):
-        if profile not in {"baseline4", "semantic7"}:
+        limits = {"baseline4": 4, "semantic7": 7, "audit1": 1}
+        if profile not in limits:
             raise ValueError("UNKNOWN_RUNTIME_PROFILE")
         self.profile = profile
-        self.limit = 7 if profile == "semantic7" else 4
+        self.limit = limits[profile]
         self.folder = Path(output)
         self.folder.mkdir(parents=True, exist_ok=False)
         self.dispatch = dispatch or isolated_sdk_call
@@ -70,7 +71,9 @@ class MainModelRuntime:
         expected = ('vision' if not self.used else
                     'vision' if self.used == ['vision_initial'] and self.repair_reason is not None else
                     'coder' if self.used[-1] == 'architect' else 'architect')
-        if self.profile == "semantic7" and self.used:
+        if self.profile == "audit1":
+            allowed = {"semantic_audit"}
+        elif self.profile == "semantic7" and self.used:
             successors = {
                 "architect": {"semantic_audit"},
                 "semantic_audit": {"architect_repair", "coder"},

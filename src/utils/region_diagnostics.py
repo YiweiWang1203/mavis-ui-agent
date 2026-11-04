@@ -1,4 +1,6 @@
 """Independent dynamic constraints, reported without rewriting a plan."""
+import re
+
 from src.schemas.region_plan import RegionPlan
 
 
@@ -19,6 +21,8 @@ def region_diagnostics(plan, segments):
 
     def visit(node, path, parent_axis=None, last=False):
         key = node["id"]
+        if re.search(r"[\s\x00-\x1f\x7f]", key):
+            report(path + "/id", key, "Document ID without whitespace or control characters")
         if key in seen:
             report(path + "/id", key, "Globally unique tree ID")
         seen.add(key)

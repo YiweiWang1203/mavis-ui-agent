@@ -9,7 +9,7 @@
     "VISION_MODEL": "Qwen/Qwen3-VL-32B-Instruct",
     "CODER_MODEL": "Qwen/Qwen3-VL-32B-Instruct",
     "CODER_PROD_MODEL": "Qwen/Qwen3-VL-32B-Instruct",
-    "UI_RENDERER_MODE": "llm",
+    "UI_RENDERER_MODE": "region_bundle_v1",
     "UI_CODER_CONTRACT_MODE": "main_system_v1",
     "UI_LAYOUT_MODE": "preserve_target",
     "UI_FUSION_MODE": "target_layout_v1",
@@ -24,7 +24,8 @@
     "VISION_MAX_RETRIES": "1",
     "UI_MAIN_LAYOUT_REPORT_ONLY": "1",
     "LAYOUT_SOLVER_ENABLED": "1",
-    "UI_REGION_REVIEW_MODE": "semantic7"
+    "UI_REGION_REVIEW_MODE": "semantic7",
+    "UI_REGION_AUDIT_POLICY": "shadow"
   },
   "runtime_profile": "semantic7"
 }

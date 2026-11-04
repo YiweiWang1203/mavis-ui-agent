@@ -162,7 +162,7 @@ def main() -> int:
 
     if not args.legacy_pipeline and not args.full_graph:
         if args.disable_layout_solver or args.disable_orientation_correction or args.renderer not in {"auto", "llm"} or args.vision_image_mode != "recognition":
-            parser.error("Main video config fixes layout preservation, orientation correction, LLM renderer and recognition input; conflicting legacy switches require --legacy-pipeline")
+            parser.error("Main video uses the renderer and input settings from config/main_ui.json. Conflicting overrides require --legacy-pipeline")
         from datetime import datetime, timezone
         from src.service.main_ui_workflow import run_main_video
         run_id = args.run_id or ("video_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))

@@ -363,6 +363,8 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
             system_prompt = (Path(__file__).resolve().parents[1] / 'prompts/ui_architect_region_semantic.md').read_text(encoding='utf-8')
             system_prompt += "\nShared executable JSON schema:\n" + json.dumps(RegionPlan.model_json_schema())
             system_prompt += "\nTree cross_align positions a child across its parent axis; start/end/center/stretch. grow=true fills available main-axis space. Preserve repeated content as element items with source identities. Use these fields only when supported by the request or observations."
+            if os.getenv("UI_REGION_AUDIT_POLICY") == "shadow":
+                system_prompt += "\nOmit cross_align to stretch, or use stretch explicitly when a panel should fill the parent across its axis. Explicit start/end/center opts out of stretch. Align content inside a panel using its own children when the panel itself must fill the parent."
     elif structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
         from pathlib import Path
         system_prompt = (Path(__file__).resolve().parents[1]/'prompts/ui_architect_hierarchy.md').read_text(encoding='utf-8')

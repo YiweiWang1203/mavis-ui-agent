@@ -3,8 +3,9 @@ from copy import deepcopy
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from src.agents.region_review import review_region_plan
+from src.agents.region_review import audit_region_plan, review_region_plan
 from src.service.main_model_runtime import MainModelRuntime, MODEL
 
 
@@ -114,6 +115,46 @@ class SemanticRuntimeTests(unittest.TestCase):
             with MainModelRuntime(Path(directory) / "run") as runtime:
                 runtime.used = ["vision_initial", "architect"]
                 with self.assertRaisesRegex(RuntimeError, "ORDER"):
+                    runtime.create("semantic_audit", model=MODEL)
+
+    @patch.dict("os.environ", {"UI_REGION_AUDIT_POLICY": "shadow"})
+    def test_shadow_preserves_executable_plan_with_audit_and_binding_defects(self):
+        plan = deepcopy(PLAN)
+        plan["requirements"] = [{"sources": ["s1"], "intent": "place item", "certainty": "explicit",
+                                 "status": "bound", "scope": None, "targets": [], "references": []}]
+        issue = {"verdict": "revise", "issues": [{
+            "sources": [], "vision_ids": ["item"], "objects": ["item"],
+            "plan_ref": "tree:item", "expected_relation": "alternate content",
+            "actual_structure": "item", "certainty": "error"}]}
+        output, slots = self.exercise(plan, [issue])
+        self.assertEqual(slots, ["vision_initial", "architect", "semantic_audit"])
+        self.assertEqual(output["region_tree"], PLAN["region_tree"] | {"grow": False})
+        self.assertEqual(output["page_meta"]["plan_selection"], {"selected": "initial"})
+        self.assertEqual(output["page_meta"]["semantic_review"]["verdict"], "revise")
+        self.assertFalse(output["page_meta"]["semantic_review_passed"])
+        self.assertFalse(output["page_meta"]["semantic_contract_passed"])
+
+    @patch.dict("os.environ", {"UI_REGION_AUDIT_POLICY": "shadow"})
+    def test_shadow_repairs_hard_failure_once_or_blocks(self):
+        bad = deepcopy(PLAN)
+        bad["region_tree"]["children"].append({"id": "ghost"})
+        output, slots = self.exercise(bad, [PASS, PLAN, PASS])
+        self.assertEqual(output["page_meta"]["plan_selection"], {"selected": "repair"})
+        self.assertEqual(slots[-3:], ["semantic_audit", "architect_repair", "semantic_reaudit"])
+        with self.assertRaisesRegex(ValueError, "ghost"):
+            self.exercise(bad, [PASS, bad])
+
+    @patch.dict("os.environ", {"UI_REGION_AUDIT_POLICY": "shadow"})
+    def test_audit_only_profile_runs_the_same_auditor_once(self):
+        packet = {"ok": True, "response": {"choices": [{
+            "finish_reason": "stop", "message": {"content": json.dumps(PASS)}}]}}
+        with tempfile.TemporaryDirectory() as directory:
+            with MainModelRuntime(Path(directory) / "run", lambda *a, **k: packet, profile="audit1") as runtime:
+                with self.assertRaisesRegex(RuntimeError, "ORDER"):
+                    runtime.create("vision", model=MODEL)
+                self.assertEqual(audit_region_plan(PLAN, {}, {}, "request", MODEL, "semantic_audit"), PASS)
+                self.assertEqual(runtime.used, ["semantic_audit"])
+                with self.assertRaisesRegex(RuntimeError, "ALREADY_CONSUMED"):
                     runtime.create("semantic_audit", model=MODEL)
 
     def test_failed_request_consumes_slot_and_stops(self):

@@ -13,6 +13,7 @@ except Exception:
 
 from src.agents.utils.path_manager import HTML_OUTPUT_DIR
 from src.utils.pipeline_trace import traced_stage, trace_html_contract
+from src.renderers.region_bundle import RENDERER
 
 
 DEFAULT_CODER_MODEL = os.getenv("CODER_MODEL", "Qwen/Qwen2.5-Coder-32B")
@@ -109,6 +110,43 @@ def is_complete_html_document(code: str) -> bool:
     return parser.starts == parser.ends == 1
 
 
+def generate_region_bundle(state, original_request, transcript):
+    from src.renderers.region_bundle import Bundle, CONTENT_TAGS, FIXED_CSS, LEAF_TAGS, render_region_bundle
+    from src.utils.coder_execution_input import coder_execution_state
+    from src.utils.pipeline_trace import trace_event
+    from src.service.main_model_runtime import main_client
+
+    if (state.get("page_meta", {}).get("contract_version") != 2 or not state.get("region_tree")
+            or os.getenv("UI_CODER_CONTRACT_MODE") != "main_system_v1"):
+        raise ValueError("REGION_BUNDLE_REQUIRES_MAIN_REGION_CONTRACT")
+    client = main_client("coder")
+    if client is None:
+        raise RuntimeError("REGION_BUNDLE_REQUIRES_PRODUCTION_RUNTIME")
+    execution = coder_execution_state(state)
+    prompt = Path(__file__).resolve().parents[1] / "prompts" / "coder_region_bundle.md"
+    system = (prompt.read_text(encoding="utf-8")
+              + "\nAllowed leaf root tags: " + ", ".join(sorted(LEAF_TAGS))
+              + "\nAllowed fragment tags: " + ", ".join(sorted(CONTENT_TAGS))
+              + "\n" + FIXED_CSS
+              + "\nJSON schema: " + json.dumps(Bundle.model_json_schema()))
+    trace_event("coder.execution_input", output=execution, diagnostic_state_preserved=True)
+    response = client.chat.completions.create(
+        model=os.getenv("CODER_MODEL", DEFAULT_CODER_MODEL),
+        messages=[{"role": "system", "content": system},
+                  {"role": "user", "content": json.dumps({
+                      "execution": execution, "original_user_request": original_request,
+                      "asr_transcript": transcript}, ensure_ascii=False)}],
+        temperature=0.2, response_format={"type": "json_object"})
+    # The bounded runtime persists the exact model response before compilation.
+    raw = response.choices[0].message.content
+    code, validation = render_region_bundle(raw, state["region_tree"])
+    trace_event("coder.region_bundle_compiled", output=code, renderer=RENDERER)
+    trace_html_contract(code, state, renderer=RENDERER,
+                        finish_reason=response.choices[0].finish_reason)
+    return {"code": code, "file_path": save_html_asset(code), "renderer": RENDERER,
+            "html_validation": validation}
+
+
 @traced_stage('coder.generate', fields={'ui_state_json'})
 def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_user_request: str = "", asr_transcript: str = "") -> dict | str:
     """Generate runnable frontend HTML from a UI-State JSON contract."""
@@ -116,6 +154,8 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
     # Reject the retired artifact-repair switch instead of silently altering HTML.
     if os.getenv("UI_INPUT_CONTRACT_MODE", "off").strip().lower() != "off":
         raise ValueError("HTML repair is retired; unset UI_INPUT_CONTRACT_MODE")
+    if renderer_mode == RENDERER:
+        return generate_region_bundle(ui_state_json, original_user_request, asr_transcript)
     if os.getenv("UI_CODER_CONTRACT_MODE", "baseline").strip().lower() != "baseline" and renderer_mode not in {"llm", "controlled_components_v1"}:
         raise ValueError("Generation contract comparison requires UI_RENDERER_MODE=llm")
     if renderer_mode == "controlled_components_v1":
