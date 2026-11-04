@@ -8,6 +8,7 @@ from src.utils.single_attempt_transport import isolated_sdk_call, write_new
 
 ACTIVE = ContextVar('main_model_runtime', default=None)
 MODEL = 'Qwen/Qwen3-VL-32B-Instruct'
+REGION_V2_NO_REVIEW_PROFILE = "region_v2_no_review4"
 
 
 def main_client(stage):
@@ -17,7 +18,7 @@ def main_client(stage):
 
 def architect_review_enabled():
     runtime = ACTIVE.get()
-    return runtime is None or runtime.profile != "source_relation_arm2"
+    return runtime is None or runtime.profile not in {"source_relation_arm2", REGION_V2_NO_REVIEW_PROFILE}
 
 
 def note_rejected_architect_repair(diagnostic):
@@ -40,7 +41,7 @@ def note_vision_repair(feedback):
 
 class MainModelRuntime:
     def __init__(self, output, dispatch=None, *, profile="baseline4"):
-        limits = {"baseline4": 4, "semantic7": 7, "audit1": 1,
+        limits = {"baseline4": 4, "semantic7": 7, REGION_V2_NO_REVIEW_PROFILE: 4, "audit1": 1,
                   "repair_probe_control1": 1, "repair_probe_feedback2": 2,
                   "source_relation_extract1": 1, "source_relation_arm2": 2}
         if profile not in limits:

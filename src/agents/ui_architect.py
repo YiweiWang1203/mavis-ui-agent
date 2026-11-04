@@ -466,6 +466,7 @@ Return the final fused UI-State JSON.
                         compiled = review_region_plan(ui_state, segments, vision_elements, user_intent,
                                                       planner_model, system_prompt, request_content)
                     else:
+                        trace_event('architect.semantic_review_skipped', reason='runtime_profile')
                         compiled = compile_region_tree(ui_state, segments, schema_version=2)
                 else:
                     compiled = compile_region_tree(ui_state, segments)

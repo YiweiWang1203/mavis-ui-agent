@@ -6,7 +6,8 @@ import unittest
 from unittest.mock import patch
 
 from src.agents.region_review import audit_region_plan, review_region_plan
-from src.service.main_model_runtime import MainModelRuntime, MODEL
+from src.agents.ui_architect import generate_ui_state
+from src.service.main_model_runtime import MainModelRuntime, MODEL, REGION_V2_NO_REVIEW_PROFILE, note_vision_repair
 from src.utils.pipeline_trace import PipelineTrace
 from src.utils.region_tree import compile_region_tree
 
@@ -39,6 +40,38 @@ class SemanticRuntimeTests(unittest.TestCase):
         output, slots = self.exercise("broken JSON", [PASS, PLAN, PASS])
         self.assertEqual(slots[-3:], ["semantic_audit", "architect_repair", "semantic_reaudit"])
         self.assertEqual(output["elements"][0]["items"], PLAN["elements"][0]["items"])
+
+    @patch.dict("os.environ", {"UI_STRUCTURE_MODE": "region_tree_v1", "UI_REGION_REVIEW_MODE": "semantic7",
+                              "UI_REGION_AUDIT_POLICY": "shadow", "CODER_PROD_MODEL": MODEL})
+    def test_no_review_keeps_production_v2_request_and_rejects_review_slots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for profile in ("semantic7", REGION_V2_NO_REVIEW_PROFILE):
+                answers = iter([{}, {}, PLAN, PASS])
+
+                def dispatch(request, **kwargs):
+                    return {"ok": True, "response": {"choices": [{
+                        "finish_reason": "stop", "message": {"content": json.dumps(next(answers))}}]}}
+
+                folder = root / profile
+                with MainModelRuntime(folder, dispatch, profile=profile) as runtime:
+                    runtime.create("vision", model=MODEL)
+                    note_vision_repair("repair trigger")
+                    runtime.create("vision", model=MODEL)
+                    output = generate_ui_state("request", {"elements": [{"id": "item"}]})
+                    self.assertEqual(output["page_meta"]["contract_version"], 2)
+                    if profile == REGION_V2_NO_REVIEW_PROFILE:
+                        for stage in ("semantic_audit", "architect_repair", "semantic_reaudit", "source_relation_extract"):
+                            with self.assertRaisesRegex(RuntimeError, "MAIN_STAGE_ORDER_VIOLATION"):
+                                runtime.create(stage, model=MODEL)
+                        self.assertFalse((folder / "semantic_audit_request.json").exists())
+                        self.assertNotIn("semantic_review", output["page_meta"])
+                        runtime.create("coder", model=MODEL)
+                        self.assertEqual(runtime.used, ["vision_initial", "vision_repair", "architect", "coder"])
+                    else:
+                        self.assertTrue(output["page_meta"]["semantic_review_passed"])
+            self.assertEqual((root / "semantic7" / "architect_request.json").read_bytes(),
+                             (root / REGION_V2_NO_REVIEW_PROFILE / "architect_request.json").read_bytes())
 
     def test_row_bottom_alias_is_opt_in_and_auditable(self):
         plan = deepcopy(PLAN)

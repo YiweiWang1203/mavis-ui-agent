@@ -139,6 +139,8 @@ def main() -> int:
     parser.add_argument("--disable-orientation-correction", action="store_true")
     parser.add_argument("--enable-asr", action="store_true", default=True, help="ASR is on in the main video configuration")
     parser.add_argument("--run-id", help="Unique main-system run identity")
+    parser.add_argument("--region-v2-no-review", action="store_true",
+                        help="Keep the v2 Planner and skip model review and repair in the main pipeline")
     parser.add_argument("--legacy-pipeline", action="store_true", help="Explicitly retain the historical unbounded diagnostic path")
     parser.add_argument(
         "--disable-layout-solver",
@@ -160,6 +162,8 @@ def main() -> int:
     parser.add_argument("--full-graph", action="store_true", help="Run the planner/supervisor LangGraph instead of the deterministic pipeline")
     args = parser.parse_args()
 
+    if args.region_v2_no_review and (args.legacy_pipeline or args.full_graph):
+        parser.error("--region-v2-no-review requires the bounded main video pipeline")
     if not args.legacy_pipeline and not args.full_graph:
         if args.disable_layout_solver or args.disable_orientation_correction or args.renderer not in {"auto", "llm"} or args.vision_image_mode != "recognition":
             parser.error("Main video uses the renderer and input settings from config/main_ui.json. Conflicting overrides require --legacy-pipeline")
@@ -169,7 +173,7 @@ def main() -> int:
         output = Path(args.output) / run_id
         terminal = run_main_video(video_path=args.video, user_prompt=args.prompt,
             output_dir=output, run_id=run_id, rotate_degrees=args.rotate_degrees,
-            image_path=args.image, preferred_locale=args.locale)
+            image_path=args.image, preferred_locale=args.locale, region_v2_no_review=args.region_v2_no_review)
         print(json.dumps(terminal, ensure_ascii=False, indent=2))
         return 0 if terminal.get("html_generated") and terminal.get("html_contract_passed") is not False else 1
 

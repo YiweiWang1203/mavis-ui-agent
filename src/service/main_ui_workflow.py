@@ -113,7 +113,7 @@ def build_main_ui_graph(output):
 
 
 def run_main_video(*, video_path, user_prompt, output_dir, run_id,
-                   rotate_degrees=180, image_path=None, preferred_locale='auto'):
+                   rotate_degrees=180, image_path=None, preferred_locale='auto', region_v2_no_review=False):
     config_path = ROOT / 'config/main_ui.json'
     config = json.loads(config_path.read_text(encoding='utf-8'))
     profile = config.get("runtime_profile", "baseline4")
@@ -125,6 +125,12 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
     if (config.get('max_physical_requests_per_case'), config.get('max_output_tokens'),
         config.get('timeout_seconds'), config.get('automatic_retries'), config.get('enable_asr')) != (request_limit, 8192, 600, 0, True):
         raise ValueError('UNSUPPORTED_MAIN_BUDGET_CONFIG')
+    if region_v2_no_review:
+        if profile != "semantic7" or config['environment'].get('UI_STRUCTURE_MODE') != "region_tree_v1":
+            raise ValueError("NO_REVIEW_REQUIRES_REGION_V2_PLANNER")
+        from src.service.main_model_runtime import REGION_V2_NO_REVIEW_PROFILE
+        profile = REGION_V2_NO_REVIEW_PROFILE
+        config.update(runtime_profile=profile, max_physical_requests_per_case=4)
     output = Path(output_dir).resolve()
     output.mkdir(parents=True, exist_ok=False)
     from dotenv import load_dotenv
