@@ -53,6 +53,38 @@ def require_complete_html(html):
         raise ValueError("DIRECT_BASELINE_INCOMPLETE_DOCUMENT")
 
 
+HTML_FENCE = re.compile(
+    r"\s*```html[ \t]*\r?\n(?P<html>.*?)\r?\n```[ \t]*\s*\Z",
+    re.I | re.S,
+)
+NESTED_FENCE_LINE = re.compile(r"(?m)^[ \t]*(?:`{3,}|~{3,})")
+
+
+def save_direct_html(raw, finish_reason, output):
+    if finish_reason != "stop":
+        raise ValueError("DIRECT_BASELINE_INCOMPLETE_RESPONSE")
+    envelope = HTML_FENCE.fullmatch(raw)
+    start, end = (0, len(raw)) if envelope is None else envelope.span("html")
+    html = raw[start:end]
+    if envelope is not None and NESTED_FENCE_LINE.search(html):
+        raise ValueError("DIRECT_BASELINE_MULTIPLE_FENCES")
+    require_complete_html(html)
+    artifact = output / "final.html"
+    payload = html.encode("utf-8")
+    with artifact.open("xb") as stream:
+        stream.write(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    return {
+        "status": "HTML_GENERATED_PENDING_BROWSER_ACCEPTANCE", "html_generated": True,
+        "html_contract_passed": True, "html_contract_scope": "document_boundary",
+        "html_path": str(artifact), "html_sha256": digest,
+        "renderer": "direct_multimodal_baseline_v1",
+        "response_envelope": "single_html_fence" if envelope is not None else "raw_html",
+        "response_utf8_start": len(raw[:start].encode("utf-8")),
+        "response_utf8_end": len(raw[:end].encode("utf-8")),
+    }
+
+
 def run_direct_baseline(prepared, output):
     state = prepared["state"]
     image = Path(state["image_path"]).resolve()
@@ -93,17 +125,7 @@ def run_direct_baseline(prepared, output):
             {"type": "text", "text": text}, {"type": "image_url", "image_url": {"url": data_url}},
         ]}],
     )
-    html = response.choices[0].message.content
-    require_complete_html(html)
-    artifact = output / "final.html"
-    payload = html.encode("utf-8")
-    with artifact.open("xb") as stream:
-        stream.write(payload)
-    digest = hashlib.sha256(payload).hexdigest()
-    trace_event("direct_multimodal_baseline.html", path=str(artifact), sha256=digest)
-    return {
-        "status": "HTML_GENERATED_PENDING_BROWSER_ACCEPTANCE", "html_generated": True,
-        "html_contract_passed": True, "html_contract_scope": "document_boundary",
-        "html_path": str(artifact), "html_sha256": digest, "input_frame": source,
-        "renderer": "direct_multimodal_baseline_v1",
-    }
+    choice = response.choices[0]
+    result = save_direct_html(choice.message.content, choice.finish_reason, output)
+    trace_event("direct_multimodal_baseline.html", **result)
+    return {**result, "input_frame": source}

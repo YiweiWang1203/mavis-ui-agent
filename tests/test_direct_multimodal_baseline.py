@@ -7,18 +7,20 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
+from src.service.direct_multimodal_baseline import save_direct_html
 from src.service.main_model_runtime import DIRECT_MULTIMODAL_PROFILE, MODEL, MainModelRuntime
 from src.service.main_ui_workflow import run_main_video
 
 
 HTML = '<!doctype html>\n<html lang="en"><head><title>Example</title></head><body><input></body></html>\n'
+FENCED = "```html\n" + HTML + "\n```"
 
 
 @pytest.mark.parametrize(("finish", "reply", "success"), [
     ("stop", HTML, True),
     ("length", HTML[:-9], False),
     ("stop", HTML[:-9], False),
-    ("stop", "```html\n" + HTML + "```", False),
+    ("stop", FENCED, True),
 ])
 def test_video_service_dispatches_frame_and_saves_only_complete_html(tmp_path, monkeypatch, finish, reply, success):
     from src.service import input_adapter, main_model_runtime, main_ui_workflow
@@ -75,7 +77,7 @@ def test_video_service_dispatches_frame_and_saves_only_complete_html(tmp_path, m
     assert result["html_generated"] is success
     assert (output / "final.html").exists() is success
     if success:
-        assert (output / "final.html").read_bytes() == reply.encode("utf-8")
+        assert (output / "final.html").read_bytes() == HTML.encode("utf-8")
         assert result["input_frame"]["sha256"] == hashlib.sha256(source).hexdigest()
         assert result["html_contract_scope"] == "document_boundary"
     request = json.loads((output / "requests/direct_coder_request.json").read_text(encoding="utf-8"))
@@ -102,3 +104,26 @@ def test_direct_profile_excludes_other_stages_and_second_request(tmp_path):
         with pytest.raises(RuntimeError, match="MAIN_STAGE_ALREADY_CONSUMED_OR_UNAUTHORIZED"):
             runtime.create("direct_coder", model=MODEL)
     assert len(calls) == 1
+
+
+def test_exact_envelope_bytes_and_offsets(tmp_path):
+    html = HTML.replace("Example", "页面").replace("\n", "\r\n")
+    raw = " \n```HTML\t\r\n" + html + "\r\n```\t\n"
+    result = save_direct_html(raw, "stop", tmp_path)
+    actual = (tmp_path / "final.html").read_bytes()
+    assert actual == html.encode("utf-8")
+    assert actual == raw.encode("utf-8")[result["response_utf8_start"]:result["response_utf8_end"]]
+    assert result["response_envelope"] == "single_html_fence"
+
+
+@pytest.mark.parametrize(("raw", "finish"), [
+    (FENCED, "length"), (FENCED + "\n" + FENCED, "stop"),
+    ("Here is the page.\n" + FENCED, "stop"), (FENCED + "\nA note.", "stop"),
+    (FENCED[:-3], "stop"), (FENCED.replace("</body>", ""), "stop"),
+    (FENCED.replace("```html", "```xml"), "stop"),
+    (FENCED.replace("<input>", "<!--\n```\n-->"), "stop"),
+])
+def test_rejects_incomplete_and_ambiguous_envelopes(tmp_path, raw, finish):
+    with pytest.raises(ValueError, match="DIRECT_BASELINE_"):
+        save_direct_html(raw, finish, tmp_path)
+    assert not (tmp_path / "final.html").exists()
