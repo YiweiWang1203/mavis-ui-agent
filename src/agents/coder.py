@@ -156,6 +156,12 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
                 "Cross-axis start/end/center uses content-sized width under a column or height under a row; stretch fills it. "
                 "The following tree-derived CSS is appended by the system; style around it and do not override it:\n"
                 + region_styles(region_tree))
+            system_prompt += (
+                "\nReturn exactly one complete HTML document, closing style, head, body and html. "
+                "Write each CSS rule once; consolidate shared styles. The system appends the supplied layout CSS, "
+                "so do not reproduce it or repeatedly add semantic-group CSS. "
+                "Use the output budget for the actual DOM, content and working interaction code. "
+                "Finish the document once; do not append reviews, alternative versions or additional style passes.")
     else:
         system_prompt = read_coder_prompt()
     if (ui_state_json.get('page_meta',{}).get('layout_solver') or {}).get('version') == 'hierarchy-v1':
@@ -172,6 +178,13 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
     )
     if os.getenv("UI_CODER_CONTRACT_MODE") == "main_system_v1":
         user_content += "\n\n[Original User Request]\n" + original_user_request + "\n\n[Fresh ASR Transcript]\n" + asr_transcript
+        if ui_state_json.get("page_meta", {}).get("contract_version") == 2:
+            from src.utils.coder_execution_input import coder_execution_state, coder_user_content
+            from src.utils.pipeline_trace import trace_event
+            execution_state = coder_execution_state(ui_state_json)
+            user_content = coder_user_content(execution_state, original_user_request, asr_transcript)
+            trace_event("coder.execution_input", output=execution_state,
+                        diagnostic_state_preserved=True)
     model_to_use = os.getenv("CODER_MODEL", DEFAULT_CODER_MODEL)
 
     client = _get_openai_client()
