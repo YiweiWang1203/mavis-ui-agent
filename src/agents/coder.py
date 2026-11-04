@@ -219,9 +219,17 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
                 from src.utils.region_execution import attach_region_styles
                 from src.utils.pipeline_trace import trace_event
                 original_html = code
-                code = attach_region_styles(code, region_tree)
-                trace_event("coder.region_style_compilation", original_html=original_html,
-                            compiled_html=code, derived_css=region_styles(region_tree))
+                try:
+                    code = attach_region_styles(code, region_tree)
+                except ValueError as error:
+                    if str(error) != "REGION_HTML_REQUIRES_ONE_HEAD":
+                        raise
+                    html_validation.update(passed=False, error=str(error), markup_passed=True)
+                    trace_event("coder.region_style_compilation_failed", diagnostic=str(error),
+                                raw_candidate_path=raw_candidate_path)
+                else:
+                    trace_event("coder.region_style_compilation", original_html=original_html,
+                                compiled_html=code, derived_css=region_styles(region_tree))
         trace_html_contract(code,ui_state_json,renderer='llm',
                     finish_reason=getattr(response.choices[0],'finish_reason',None))
 

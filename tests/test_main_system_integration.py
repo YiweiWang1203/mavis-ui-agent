@@ -161,7 +161,8 @@ def test_platform_minimal_patch_preserves_old_fallbacks():
     assert infer('后台管理系统') == 'desktop'
 
 
-def test_main_graph_reaches_review_and_keeps_context(tmp_path, monkeypatch):
+@pytest.mark.parametrize('contract_passed', [True, False])
+def test_main_graph_reaches_review_and_keeps_context(tmp_path, monkeypatch, contract_passed):
     pytest.importorskip('langgraph')
     import src.graph as graph_package
     from src.service.main_ui_workflow import build_main_ui_graph
@@ -174,7 +175,11 @@ def test_main_graph_reaches_review_and_keeps_context(tmp_path, monkeypatch):
             seen.append(name)
             if name == 'vision': update = {'vision_status': {'valid': True}}
             elif name == 'architect': update = {'ui_state_json': {'elements': [{'id': 'a'}]}}
-            else: update = {'final_code': '<html></html>', 'final_code_path': str(html)}
+            else: update = {'final_code': '<html></html>', 'final_code_path': str(html),
+                            'raw_candidate_path': str(html),
+                            'html_validation': {'passed': contract_passed, 'expected': ['tree'],
+                                                'actual': ['tree'] if contract_passed else ['duplicate'],
+                                                'error': None if contract_passed else 'HTML_REGION_TREE_MISMATCH'}}
             return SimpleNamespace(update=update)
         return invoke
     monkeypatch.setattr(graph_package, 'nodes', SimpleNamespace(vision_node=node('vision'), ui_architect_node=node('architect'), code_node=node('coder')), raising=False)
@@ -183,6 +188,11 @@ def test_main_graph_reaches_review_and_keeps_context(tmp_path, monkeypatch):
         result = build_main_ui_graph(folder).invoke({'original_user_request': 'keep'})
     assert seen == ['vision', 'architect', 'coder']
     assert result['review']['html_persisted']
+    assert result['review']['html_contract_passed'] is contract_passed
+    assert result['review']['html_validation']['expected'] == ['tree']
+    assert result['review']['html_validation']['actual'] == (['tree'] if contract_passed else ['duplicate'])
+    assert result['review']['browser_behavior'] == 'NOT_EXECUTED'
+    assert result['review']['raw_candidate_path'] == str(html)
     assert result['original_user_request'] == 'keep'
 
 
