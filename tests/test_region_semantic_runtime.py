@@ -57,6 +57,23 @@ class SemanticRuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.exercise("broken", [PASS, "still broken"])
 
+    def test_repair_that_drops_inventory_leaf_keeps_valid_initial(self):
+        plan = deepcopy(PLAN)
+        plan["elements"].append({"id": "title", "type": "text", "origin": "vision"})
+        plan["region_tree"]["children"].append({"id": "title"})
+        repaired = deepcopy(plan)
+        repaired["region_tree"]["children"].pop()
+        issue = {"verdict": "revise", "issues": [{
+            "sources": [], "vision_ids": ["item"], "objects": ["item"],
+            "plan_ref": "tree:item", "expected_relation": "supported content",
+            "actual_structure": "content differs", "certainty": "error"}]}
+        output, slots = self.exercise(plan, [issue, repaired])
+        self.assertEqual(slots[-1], "architect_repair")
+        self.assertEqual(output["region_tree"]["children"][-1]["id"], "title")
+        self.assertEqual(output["page_meta"]["plan_selection"]["selected"], "initial")
+        self.assertIn("title", output["page_meta"]["plan_selection"]["diagnostic"])
+        self.assertFalse(output["page_meta"]["semantic_review_passed"])
+
     def test_invalid_first_review_does_not_block_structural_repair(self):
         output, slots = self.exercise("broken", [{"verdict": "pass"}, PLAN, PASS])
         self.assertTrue(output["page_meta"]["semantic_review_passed"])

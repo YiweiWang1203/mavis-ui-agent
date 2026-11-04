@@ -15,6 +15,15 @@ def main_client(stage):
     return runtime.client(stage) if runtime else None
 
 
+def note_rejected_architect_repair(diagnostic):
+    runtime = ACTIVE.get()
+    if (runtime is None or runtime.profile != "semantic7" or runtime.failed
+            or runtime.used[-1:] != ["architect_repair"] or runtime.architect_repair_rejected):
+        raise RuntimeError("UNAUTHORIZED_ARCHITECT_REPAIR_FALLBACK")
+    write_new(runtime.folder / "architect_repair_rejected.json", diagnostic)
+    runtime.architect_repair_rejected = True
+
+
 def note_vision_repair(feedback):
     runtime = ACTIVE.get()
     if runtime:
@@ -36,6 +45,7 @@ class MainModelRuntime:
         self.used = []
         self.repair_reason = None
         self.failed = False
+        self.architect_repair_rejected = False
 
     def __enter__(self):
         self.token = ACTIVE.set(self)
@@ -64,7 +74,7 @@ class MainModelRuntime:
             successors = {
                 "architect": {"semantic_audit"},
                 "semantic_audit": {"architect_repair", "coder"},
-                "architect_repair": {"semantic_reaudit"},
+                "architect_repair": {"coder"} if self.architect_repair_rejected else {"semantic_reaudit"},
                 "semantic_reaudit": {"coder"},
             }
             allowed = successors.get(self.used[-1], {expected})

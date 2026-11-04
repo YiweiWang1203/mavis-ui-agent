@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import Field, create_model
 
 from src.schemas.region_plan import Contract, RegionPlan
-from src.service.main_model_runtime import main_client
+from src.service.main_model_runtime import main_client, note_rejected_architect_repair
 from src.utils.pipeline_trace import trace_event
 from src.utils.region_tree import compile_region_tree
 from src.utils.region_audit_input import observation_content, audit_plan_view, plan_references
@@ -121,20 +121,33 @@ def review_region_plan(plan, segments, vision, original_intent, model, planner_p
         trace_event("architect.initial_contract_error", diagnostics=structural_errors, output=plan)
     first = audit_with_status(plan, "semantic_audit")
     final_review = first
+    selection = {"selected": "initial"}
     if first["verdict"] == "revise" or structural_errors:
-        repaired = request("architect_repair", planner_prompt, {
-            "previous_plan": plan,
-            "review": first,
-            "structural_errors": structural_errors,
-            "instruction": "Correct the supported issues and return the complete plan under the same schema."},
-            original_content=planner_content)
-        trace_event("architect.repair_parsed", output=repaired, previous=plan)
-        compile_region_tree(repaired, segments, schema_version=2)
-        second = audit_with_status(repaired, "semantic_reaudit")
-        plan = repaired
-        final_review = second
-    result = compile_region_tree(plan, segments, schema_version=2)
+        try:
+            repaired = request("architect_repair", planner_prompt, {
+                "previous_plan": plan,
+                "review": first,
+                "structural_errors": structural_errors,
+                "instruction": "Correct the supported issues and return the complete plan under the same schema."},
+                original_content=planner_content)
+            trace_event("architect.repair_parsed", output=repaired, previous=plan)
+            result = compile_region_tree(repaired, segments, schema_version=2)
+        except ValueError as error:
+            selection.update(repair_rejected=True, diagnostic=str(error))
+            trace_event("architect.repair_rejected", output=selection)
+            try:
+                result = compile_region_tree(plan, segments, schema_version=2)
+            except ValueError:
+                raise error
+            note_rejected_architect_repair(selection)
+        else:
+            final_review = audit_with_status(repaired, "semantic_reaudit")
+            selection["selected"] = "repair"
+    else:
+        result = compile_region_tree(plan, segments, schema_version=2)
+    result["page_meta"]["plan_selection"] = selection
     result["page_meta"]["semantic_review"] = final_review
     result["page_meta"]["semantic_review_passed"] = (
-        final_review["verdict"] == "pass" and result["page_meta"]["semantic_contract_passed"])
+        not selection.get("repair_rejected") and final_review["verdict"] == "pass"
+        and result["page_meta"]["semantic_contract_passed"])
     return result

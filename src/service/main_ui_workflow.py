@@ -84,6 +84,7 @@ def build_main_ui_graph(output):
                          and Path(path).read_text(encoding='utf-8') == code)
         state['review'] = {'reviewer': 'local_artifact_and_structure_audit',
             'semantic_model_review': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_review'),
+            'plan_selection': (state.get('ui_state_json') or {}).get('page_meta', {}).get('plan_selection'),
             'semantic_model_passed': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_review_passed'),
             'semantic_contract_issues': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_contract_issues'),
             'semantic_contract_passed': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_contract_passed'),
@@ -93,7 +94,7 @@ def build_main_ui_graph(output):
             'raw_candidate_path': state.get('raw_candidate_path'),
             'structure': state_summary(state.get('ui_state_json')),
             'browser_behavior': 'NOT_EXECUTED', 'semantic_requirement_coverage': 'UNKNOWN',
-            'limitations': 'No semantic pass or browser pass implied. No automatic repair request.'}
+            'limitations': 'Artifact persistence and structure checks do not imply semantic or browser acceptance. Bounded planning repair and plan selection are recorded in request evidence and review.'}
         save(output / 'review.json', state['review'])
         return state
     graph = StateGraph(dict)
