@@ -9,6 +9,8 @@ from src.utils.single_attempt_transport import isolated_sdk_call, write_new
 ACTIVE = ContextVar('main_model_runtime', default=None)
 MODEL = 'Qwen/Qwen3-VL-32B-Instruct'
 REGION_V2_NO_REVIEW_PROFILE = "region_v2_no_review4"
+SOURCE_BINDING_UPSTREAM_PROFILE = "source_binding_upstream4"
+SOURCE_BINDING_ARM_PROFILE = "source_binding_arm2"
 
 
 def main_client(stage):
@@ -18,7 +20,9 @@ def main_client(stage):
 
 def architect_review_enabled():
     runtime = ACTIVE.get()
-    return runtime is None or runtime.profile not in {"source_relation_arm2", REGION_V2_NO_REVIEW_PROFILE}
+    return runtime is None or runtime.profile not in {
+        "source_relation_arm2", REGION_V2_NO_REVIEW_PROFILE, SOURCE_BINDING_ARM_PROFILE,
+    }
 
 
 def note_rejected_architect_repair(diagnostic):
@@ -43,7 +47,8 @@ class MainModelRuntime:
     def __init__(self, output, dispatch=None, *, profile="baseline4"):
         limits = {"baseline4": 4, "semantic7": 7, REGION_V2_NO_REVIEW_PROFILE: 4, "audit1": 1,
                   "repair_probe_control1": 1, "repair_probe_feedback2": 2,
-                  "source_relation_extract1": 1, "source_relation_arm2": 2}
+                  "source_relation_extract1": 1, "source_relation_arm2": 2,
+                  SOURCE_BINDING_UPSTREAM_PROFILE: 4, SOURCE_BINDING_ARM_PROFILE: 2}
         if profile not in limits:
             raise ValueError("UNKNOWN_RUNTIME_PROFILE")
         self.profile = profile
@@ -75,7 +80,8 @@ class MainModelRuntime:
         else:
             slot = stage
         if stage not in ('vision', 'architect', 'semantic_audit', 'architect_repair', 'semantic_reaudit',
-                         'coder', 'source_relation_extract') or slot in self.used or len(self.used) >= self.limit:
+                         'coder', 'source_relation_extract', 'source_relation_bind'
+                         ) or slot in self.used or len(self.used) >= self.limit:
             raise RuntimeError('MAIN_STAGE_ALREADY_CONSUMED_OR_UNAUTHORIZED')
         expected = ('vision' if not self.used else
                     'vision' if self.used == ['vision_initial'] and self.repair_reason is not None else
@@ -88,8 +94,17 @@ class MainModelRuntime:
             allowed = {"coder"} if self.used else {"architect_repair"}
         elif self.profile == "source_relation_extract1":
             allowed = {"source_relation_extract"}
-        elif self.profile == "source_relation_arm2":
+        elif self.profile in {"source_relation_arm2", SOURCE_BINDING_ARM_PROFILE}:
             allowed = {"coder"} if self.used else {"architect"}
+        elif self.profile == SOURCE_BINDING_UPSTREAM_PROFILE:
+            if not self.used or (self.used == ["vision_initial"] and self.repair_reason is not None):
+                allowed = {"vision"}
+            elif self.used[-1] in {"vision_initial", "vision_repair"}:
+                allowed = {"source_relation_extract"}
+            elif self.used[-1] == "source_relation_extract":
+                allowed = {"source_relation_bind"}
+            else:
+                allowed = set()
         elif self.profile == "semantic7" and self.used:
             successors = {
                 "architect": {"semantic_audit"},

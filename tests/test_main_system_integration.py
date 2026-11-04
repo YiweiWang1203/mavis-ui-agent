@@ -1,6 +1,7 @@
 import ast
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -210,3 +211,64 @@ def test_graph_failure_identifies_node_and_redacts_secret(tmp_path, monkeypatch)
     text = (tmp_path / 'vision_error.json').read_text(encoding='utf-8')
     assert 'should-not-appear' not in text and '[REDACTED]' in text and 'ValueError' in text
     assert not result['review']['html_persisted']
+
+
+def test_source_binding_pair_shares_vision_and_only_adds_id_links(tmp_path, monkeypatch):
+    pytest.importorskip("langgraph")
+    import src.graph as graph_package
+    from src.agents.ui_architect import generate_ui_state
+    from src.service.main_ui_workflow import run_source_binding_pair
+
+    for key, value in {"UI_STRUCTURE_MODE": "region_tree_v1", "UI_REGION_REVIEW_MODE": "semantic7",
+                       "UI_REGION_AUDIT_POLICY": "shadow", "CODER_PROD_MODEL": MODEL}.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("MAVIS_MAIN_RUN_ID", "offline")
+    vision = {"elements": [{"id": "plus", "text": "plus"}, {"id": "input", "text": "input"}]}
+    relations = {"relations": [{"source_id": "s1", "source_quote": "Put plus by the input.",
+                                "subject": "plus", "reference": "input", "frame": "local",
+                                "relation": "by", "certainty": "explicit"}]}
+    raw_links = {"links": [{"relation_index": 0, "subject_id": "plus", "reference_id": "input",
+                            "subject_basis": "observed label", "reference_basis": "observed label"}]}
+    plan = {"page_meta": {"viewport": {"width": 800, "height": 600}}, "requirements": [], "actions": [],
+            "elements": [{"id": "plus", "type": "button", "origin": "vision"}],
+            "region_tree": {"id": "page", "axis": "row", "children": [{"id": "plus"}]}}
+
+    def vision_node(state):
+        main_client("vision").chat.completions.create(model=MODEL)
+        return SimpleNamespace(update={"vision_elements": vision, "vision_status": {"valid": True}})
+
+    def architect_node(state):
+        compiled = generate_ui_state(state["original_user_request"], state["vision_elements"],
+                                     asr_transcript=state["asr_transcript"],
+                                     source_relation_evidence=state["source_relation_evidence"])
+        return SimpleNamespace(update={"ui_state_json": compiled})
+
+    def code_node(state):
+        main_client("coder").chat.completions.create(model=MODEL)
+        path = tmp_path / (os.environ["MAVIS_MAIN_RUN_ID"] + ".html")
+        code = "<!doctype html><html><body>offline</body></html>"
+        path.write_text(code, encoding="utf-8")
+        return SimpleNamespace(update={"final_code": code, "final_code_path": str(path),
+                                       "html_validation": {"passed": True}})
+
+    answers = iter([{}, relations, raw_links, plan, {}, plan, {}])
+
+    def dispatch(request, **kwargs):
+        return {"ok": True, "response": {"choices": [
+            {"finish_reason": "stop", "message": {"content": json.dumps(next(answers))}}]}}
+
+    monkeypatch.setattr(graph_package, "nodes", SimpleNamespace(
+        vision_node=vision_node, ui_architect_node=architect_node, code_node=code_node), raising=False)
+    result = run_source_binding_pair({"original_user_request": "make UI", "asr_transcript": "Put plus by the input."},
+                                     tmp_path, "offline", dispatch)
+    assert result["upstream"]["model_calls"] == ["vision_initial", "source_relation_extract", "source_relation_bind"]
+    assert all(result[arm]["model_calls"] == ["architect", "coder"] for arm in ("control", "candidate"))
+    assert all((tmp_path / arm / "final.html").is_file() for arm in ("control", "candidate"))
+    control, candidate = [json.loads((tmp_path / arm / "requests" / "architect_request.json").read_text(encoding="utf-8"))
+                          for arm in ("control", "candidate")]
+    section = "\n\n[Source Relation Evidence]\n"
+    baseline, control_evidence = control["messages"][1]["content"].split(section)
+    expected = relations | {"id_links": [{"relation_index": 0, "subject_id": "plus", "reference_id": "input"}]}
+    assert json.loads(control_evidence) == relations
+    control["messages"][1]["content"] = baseline + section + json.dumps(expected, ensure_ascii=False)
+    assert candidate == control

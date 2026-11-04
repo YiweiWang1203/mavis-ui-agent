@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 from src.agents.region_review import audit_region_plan, review_region_plan
 from src.agents.ui_architect import generate_ui_state
-from src.service.main_model_runtime import MainModelRuntime, MODEL, REGION_V2_NO_REVIEW_PROFILE, note_vision_repair
+from src.service.main_model_runtime import (
+    MainModelRuntime, MODEL, REGION_V2_NO_REVIEW_PROFILE, SOURCE_BINDING_ARM_PROFILE,
+    SOURCE_BINDING_UPSTREAM_PROFILE, note_vision_repair,
+)
+from src.service.source_relations import bind_relations
 from src.utils.pipeline_trace import PipelineTrace
 from src.utils.region_tree import compile_region_tree
 
@@ -40,6 +44,46 @@ class SemanticRuntimeTests(unittest.TestCase):
         output, slots = self.exercise("broken JSON", [PASS, PLAN, PASS])
         self.assertEqual(slots[-3:], ["semantic_audit", "architect_repair", "semantic_reaudit"])
         self.assertEqual(output["elements"][0]["items"], PLAN["elements"][0]["items"])
+
+    def test_source_binding_runtime_partition_and_unique_id_validation(self):
+        numbered = {"s1": "Put plus inside the input."}
+        relations = {"relations": [{"source_id": "s1", "source_quote": numbered["s1"],
+                                    "subject": "plus", "reference": "input", "frame": "local",
+                                    "relation": "inside", "certainty": "explicit"}]}
+        vision = {"elements": [{"id": "plus", "text": "plus"}, {"id": "input"}, {"id": "input"}]}
+        raw = {"links": [{"relation_index": 0, "subject_id": "plus", "reference_id": "input",
+                          "subject_basis": "exact observed label", "reference_basis": "duplicate object"}]}
+
+        def dispatch(request, **kwargs):
+            if "messages" in request:
+                payload = json.loads(request["messages"][1]["content"])
+                self.assertEqual(payload, {"relation_records": relations, "asr_segments": numbered,
+                                           "observed_objects": [{"id": "plus", "text": "plus"}]})
+            return {"ok": True, "response": {"choices": [
+                {"finish_reason": "stop", "message": {"content": json.dumps(raw)}}]}}
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with MainModelRuntime(root / "upstream", dispatch, profile=SOURCE_BINDING_UPSTREAM_PROFILE) as runtime:
+                runtime.create("vision", model=MODEL)
+                note_vision_repair("observed hard failure")
+                runtime.create("vision", model=MODEL)
+                runtime.create("source_relation_extract", model=MODEL)
+                with self.assertRaisesRegex(RuntimeError, "MAIN_STAGE_ORDER_VIOLATION"):
+                    runtime.create("architect", model=MODEL)
+                value = bind_relations(relations, numbered, vision)
+                self.assertEqual(value["id_links"], [{"relation_index": 0, "subject_id": "plus", "reference_id": None}])
+                self.assertEqual(value["raw_links"], raw)
+                self.assertEqual(value["rejected_links"][0]["reason"], "NON_UNIQUE_OR_MISSING_ID")
+                self.assertEqual(len(runtime.used), 4)
+            for arm in ("control", "candidate"):
+                with MainModelRuntime(root / arm, dispatch, profile=SOURCE_BINDING_ARM_PROFILE) as runtime:
+                    runtime.create("architect", model=MODEL)
+                    for stage in ("vision", "source_relation_bind", "semantic_audit", "architect_repair", "semantic_reaudit"):
+                        with self.assertRaisesRegex(RuntimeError, "MAIN_STAGE_ORDER_VIOLATION"):
+                            runtime.create(stage, model=MODEL)
+                    runtime.create("coder", model=MODEL)
+                    self.assertEqual(runtime.used, ["architect", "coder"])
 
     @patch.dict("os.environ", {"UI_STRUCTURE_MODE": "region_tree_v1", "UI_REGION_REVIEW_MODE": "semantic7",
                               "UI_REGION_AUDIT_POLICY": "shadow", "CODER_PROD_MODEL": MODEL})

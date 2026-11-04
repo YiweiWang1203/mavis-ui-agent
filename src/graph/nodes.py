@@ -516,8 +516,10 @@ def ui_architect_node(state: State) -> Command[Literal["supervisor"]]:
 
     # 正常的数据合成业务逻辑
     combined_intent = original_prompt
+    source_evidence = ({"source_relation_evidence": state["source_relation_evidence"]}
+                       if "source_relation_evidence" in state else {})
     result_json = generate_ui_state(combined_intent, vision_elements, preferred_locale=state.get("preferred_locale"),
-                                    asr_transcript=state.get("asr_transcript") or "")
+                                    asr_transcript=state.get("asr_transcript") or "", **source_evidence)
 
     try:
         al = state.get('_audit_logger_instance')

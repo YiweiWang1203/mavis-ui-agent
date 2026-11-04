@@ -8,21 +8,16 @@ import re
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
-from typing import Literal
-
-from pydantic import Field
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.agents.coder import generate_frontend_code
-from src.agents.region_review import request_region_review
 from src.agents.ui_architect import generate_ui_state
-from src.schemas.region_plan import Contract
 from src.service.main_model_runtime import MODEL, MainModelRuntime
 from src.service.main_ui_workflow import safe_diagnostic, sha
 from src.utils.pipeline_trace import PipelineTrace
-from src.utils.region_audit_input import observation_content
+from src.service.source_relations import extract_relations
 from src.utils.region_tree import speech_segments
 from src.utils.single_attempt_transport import isolated_sdk_call, write_new
 
@@ -31,20 +26,6 @@ FROZEN_FILES = {
     "input_002.json": "99ee539cddfa8a03dac9fb7facafea781ab235853f6c0e6bd47d862491a4522d",
     "source_002_architect_request.json": "cc2014af21998a07cc612f3a3a2c467b011d2e5b15539d82856ac8761b95014c",
 }
-
-
-class SourceRelation(Contract):
-    source_id: str
-    source_quote: str = Field(min_length=1)
-    subject: str | None
-    reference: str | None
-    frame: str | None
-    relation: str | None
-    certainty: Literal["explicit", "inferred", "unknown"]
-
-
-class SourceRelations(Contract):
-    relations: list[SourceRelation]
 
 
 @dataclass(frozen=True)
@@ -72,21 +53,6 @@ def load_frozen(folder):
     if numbered != json.loads(asr):
         raise ValueError("SOURCE_RELATION_FROZEN_ASR_MISMATCH")
     return FrozenInput(request, intent, locale, json.loads(vision), transcript, frozen["original_user_request"], numbered)
-
-
-def extract_relations(numbered, vision):
-    payload = {"asr_segments": numbered, "object_evidence": observation_content(vision)}
-    system = (
-        "Extract spoken spatial relations from the numbered ASR. Object evidence helps identify referents "
-        "but does not specify the requested geometry. For each relation record the exact source segment ID and "
-        "verbatim quote, subject, reference object, local or page reference frame, direction or placement, "
-        "and certainty. Prefer the named local reference when supported. Mark genuinely unresolved bindings "
-        "unknown and use null for unresolved fields. Do not produce layout instructions, tree nodes, geometry, "
-        "or a patch. Return one JSON object matching this schema:\n" + json.dumps(SourceRelations.model_json_schema())
-    )
-    value = request_region_review(MODEL, "source_relation_extract", system, payload)
-    SourceRelations.model_validate(value)
-    return value
 
 
 def run_planner(folder, frozen, evidence, dispatch):

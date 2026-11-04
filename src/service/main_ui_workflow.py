@@ -1,10 +1,13 @@
 """Production video entry using the shared UI nodes and bounded provider runtime."""
+from contextlib import nullcontext
+from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -37,40 +40,42 @@ def safe_diagnostic(error):
     return {'error_type': type(error).__name__, 'sanitized_traceback': text}
 
 
-def build_main_ui_graph(output):
+def wrap_main_node(output, name, fn):
+    def invoke(state):
+        state = dict(state)
+        save(output / (name + '_input.json'), state)
+        started = time.monotonic()
+        try:
+            result = fn(state)
+            state.update(result.update)
+            reason = None
+            if name == 'vision' and not (state.get('vision_status') or {}).get('valid'):
+                reason = {'vision_status': state.get('vision_status')}
+            elif name == 'architect' and (not isinstance(state.get('ui_state_json'), dict)
+                    or state['ui_state_json'].get('error') or not state['ui_state_json'].get('elements')):
+                reason = {'ui_state_error': (state.get('ui_state_json') or {}).get('error', 'EMPTY_UI_STATE')}
+            elif name == 'coder' and not state.get('final_code'):
+                reason = {'coder_error': 'NO_FINAL_CODE_RETURNED'}
+            if reason:
+                state['failed_node'] = name
+                state['node_failure_reason'] = reason
+        except Exception as error:
+            state['failed_node'] = name
+            state['node_error_type'] = type(error).__name__
+            save(output / (name + '_error.json'), safe_diagnostic(error))
+        state['node_history'] = state.get('node_history', []) + [
+            {'node': name, 'seconds': time.monotonic() - started,
+             'status': 'FAILED' if state.get('failed_node') else 'RETURNED_NOT_ACCEPTANCE'}]
+        save(output / (name + '_output.json'), state)
+        return state
+    return invoke
+
+
+def build_main_ui_graph(output, *, start_at_architect=False):
     from langgraph.graph import START, END, StateGraph
     from src.graph import nodes
     from src.utils.pipeline_trace import state_summary
     output = Path(output)
-    def wrap(name, fn):
-        def invoke(state):
-            state = dict(state)
-            save(output / (name + '_input.json'), state)
-            started = time.monotonic()
-            try:
-                result = fn(state)
-                state.update(result.update)
-                reason = None
-                if name == 'vision' and not (state.get('vision_status') or {}).get('valid'):
-                    reason = {'vision_status': state.get('vision_status')}
-                elif name == 'architect' and (not isinstance(state.get('ui_state_json'), dict)
-                        or state['ui_state_json'].get('error') or not state['ui_state_json'].get('elements')):
-                    reason = {'ui_state_error': (state.get('ui_state_json') or {}).get('error', 'EMPTY_UI_STATE')}
-                elif name == 'coder' and not state.get('final_code'):
-                    reason = {'coder_error': 'NO_FINAL_CODE_RETURNED'}
-                if reason:
-                    state['failed_node'] = name
-                    state['node_failure_reason'] = reason
-            except Exception as error:
-                state['failed_node'] = name
-                state['node_error_type'] = type(error).__name__
-                save(output / (name + '_error.json'), safe_diagnostic(error))
-            state['node_history'] = state.get('node_history', []) + [
-                {'node': name, 'seconds': time.monotonic() - started,
-                 'status': 'FAILED' if state.get('failed_node') else 'RETURNED_NOT_ACCEPTANCE'}]
-            save(output / (name + '_output.json'), state)
-            return state
-        return invoke
     def after_vision(state):
         return 'architect' if not state.get('failed_node') and state.get('vision_status', {}).get('valid') else 'review'
     def after_architect(state):
@@ -100,20 +105,89 @@ def build_main_ui_graph(output):
         save(output / 'review.json', state['review'])
         return state
     graph = StateGraph(dict)
-    graph.add_node('vision', wrap('vision', nodes.vision_node))
-    graph.add_node('architect', wrap('architect', nodes.ui_architect_node))
-    graph.add_node('coder', wrap('coder', nodes.code_node))
+    graph.add_node('architect', wrap_main_node(output, 'architect', nodes.ui_architect_node))
+    graph.add_node('coder', wrap_main_node(output, 'coder', nodes.code_node))
     graph.add_node('review', review)
-    graph.add_edge(START, 'vision')
-    graph.add_conditional_edges('vision', after_vision, ['architect', 'review'])
+    if start_at_architect:
+        graph.add_edge(START, 'architect')
+    else:
+        graph.add_node('vision', wrap_main_node(output, 'vision', nodes.vision_node))
+        graph.add_edge(START, 'vision')
+        graph.add_conditional_edges('vision', after_vision, ['architect', 'review'])
     graph.add_conditional_edges('architect', after_architect, ['coder', 'review'])
     graph.add_edge('coder', 'review')
     graph.add_edge('review', END)
     return graph.compile()
 
 
+def run_source_binding_pair(state, output, run_id, dispatch=None):
+    from src.graph import nodes
+    from src.service.main_model_runtime import (
+        MainModelRuntime, SOURCE_BINDING_ARM_PROFILE, SOURCE_BINDING_UPSTREAM_PROFILE,
+    )
+    from src.service.source_relations import bind_relations, extract_relations
+    from src.utils.pipeline_trace import trace_event
+    from src.utils.region_tree import speech_segments
+
+    upstream = output / 'upstream'
+    upstream.mkdir()
+    extraction = binding = None
+    stage = 'vision'
+    with MainModelRuntime(upstream / 'requests', dispatch, profile=SOURCE_BINDING_UPSTREAM_PROFILE) as runtime:
+        shared = wrap_main_node(upstream, 'vision', nodes.vision_node)(state)
+        try:
+            if not shared.get('vision_status', {}).get('valid') or shared.get('failed_node'):
+                raise ValueError("SOURCE_BINDING_REQUIRES_VALID_CURRENT_VISION")
+            vision = shared['vision_elements']
+            numbered = {key: value['text'] for key, value in speech_segments(shared.get('asr_transcript', '')).items()}
+            stage = 'source_relation_extract'
+            if not numbered:
+                raise ValueError("SOURCE_BINDING_REQUIRES_CURRENT_ASR")
+            extraction = extract_relations(numbered, vision)
+            save(upstream / 'relations.json', extraction)
+            stage = 'source_relation_bind'
+            binding = bind_relations(extraction, numbered, vision)
+            save(upstream / 'binding.json', binding)
+        except Exception as error:
+            save(upstream / (stage + '_failure.json'), safe_diagnostic(error))
+    result = {'upstream': {'model_calls': list(runtime.used),
+                           'status': 'READY' if binding is not None else 'FAILED_' + stage.upper()}}
+    save(upstream / 'terminal.json', result['upstream'])
+    for name in ('control', 'candidate'):
+        folder = output / name
+        folder.mkdir()
+        arm = {'status': 'NO_HTML', 'model_calls': [], 'html_generated': False}
+        if extraction is None or (name == 'candidate' and binding is None):
+            arm['status'] = 'BLOCKED_BY_UPSTREAM'
+        else:
+            os.environ['MAVIS_MAIN_RUN_ID'] = run_id + '_' + name
+            inputs = deepcopy(shared)
+            evidence = deepcopy(extraction)
+            if name == 'candidate':
+                evidence['id_links'] = binding['id_links']
+            inputs['source_relation_evidence'] = evidence
+            trace_event('source_binding.arm_started', arm=name)
+            with MainModelRuntime(folder / 'requests', dispatch, profile=SOURCE_BINDING_ARM_PROFILE) as runtime:
+                final = build_main_ui_graph(folder, start_at_architect=True).invoke(inputs)
+                save(folder / 'final_state.json', final)
+            arm.update(model_calls=list(runtime.used), failed_node=final.get('failed_node'), review=final.get('review'))
+            if (final.get('review') or {}).get('html_persisted'):
+                artifact = folder / 'final.html'
+                with Path(final['final_code_path']).open('rb') as source, artifact.open('xb') as target:
+                    shutil.copyfileobj(source, target)
+                arm.update(status='HTML_GENERATED_PENDING_BROWSER_ACCEPTANCE', html_generated=True,
+                           html_path=str(artifact), html_sha256=sha(artifact),
+                           html_contract_passed=final['review'].get('html_contract_passed'))
+                if arm['html_contract_passed'] is False:
+                    arm['status'] = 'HTML_CONTRACT_FAILED_PENDING_BROWSER_ACCEPTANCE'
+        save(folder / 'terminal.json', arm)
+        result[name] = arm
+    return result
+
+
 def run_main_video(*, video_path, user_prompt, output_dir, run_id,
-                   rotate_degrees=180, image_path=None, preferred_locale='auto', region_v2_no_review=False):
+                   rotate_degrees=180, image_path=None, preferred_locale='auto', region_v2_no_review=False,
+                   source_binding_pair=False):
     config_path = ROOT / 'config/main_ui.json'
     config = json.loads(config_path.read_text(encoding='utf-8'))
     profile = config.get("runtime_profile", "baseline4")
@@ -125,12 +199,18 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
     if (config.get('max_physical_requests_per_case'), config.get('max_output_tokens'),
         config.get('timeout_seconds'), config.get('automatic_retries'), config.get('enable_asr')) != (request_limit, 8192, 600, 0, True):
         raise ValueError('UNSUPPORTED_MAIN_BUDGET_CONFIG')
-    if region_v2_no_review:
+    if region_v2_no_review or source_binding_pair:
         if profile != "semantic7" or config['environment'].get('UI_STRUCTURE_MODE') != "region_tree_v1":
             raise ValueError("NO_REVIEW_REQUIRES_REGION_V2_PLANNER")
         from src.service.main_model_runtime import REGION_V2_NO_REVIEW_PROFILE
         profile = REGION_V2_NO_REVIEW_PROFILE
         config.update(runtime_profile=profile, max_physical_requests_per_case=4)
+    if source_binding_pair:
+        from src.service.main_model_runtime import SOURCE_BINDING_ARM_PROFILE, SOURCE_BINDING_UPSTREAM_PROFILE
+        config.update(runtime_profile="source_binding_pair8", max_physical_requests_per_case=8,
+                      request_partitions={"upstream": SOURCE_BINDING_UPSTREAM_PROFILE,
+                                          "control": SOURCE_BINDING_ARM_PROFILE, "candidate": SOURCE_BINDING_ARM_PROFILE})
+        config['environment']['UI_REGION_PLAN_NORMALIZATION'] = ''
     output = Path(output_dir).resolve()
     output.mkdir(parents=True, exist_ok=False)
     from dotenv import load_dotenv
@@ -159,7 +239,8 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
         from src.utils.pipeline_trace import PipelineTrace
         from src.service.input_adapter import prepare_workflow_input
         from langchain_core.messages import HumanMessage
-        with PipelineTrace(output / 'trace', terminal), MainModelRuntime(output / 'requests', profile=profile) as runtime:
+        runtime_context = nullcontext() if source_binding_pair else MainModelRuntime(output / 'requests', profile=profile)
+        with PipelineTrace(output / 'trace', terminal), runtime_context as runtime:
             prepared = prepare_workflow_input(text=user_prompt, video_path=video_path, image_path=image_path,
                 preprocess_output_dir=str(output / 'preprocess'), rotate_degrees=rotate_degrees,
                 enable_asr=True, vision_image_mode='recognition')
@@ -168,6 +249,16 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
             if preferred_locale != 'auto':
                 state['preferred_locale'] = preferred_locale
             state['messages'] = [HumanMessage(content=m['content']) for m in state['messages']]
+            if source_binding_pair:
+                paired = run_source_binding_pair(state, output, run_id)
+                terminal['pair'] = paired
+                terminal['model_calls'] = [f"{part}:{slot}" for part, row in paired.items() for slot in row['model_calls']]
+                terminal['html_generated'] = all(paired[name]['html_generated'] for name in ('control', 'candidate'))
+                terminal['html_contract_passed'] = all(
+                    paired[name].get('html_contract_passed') is True for name in ('control', 'candidate'))
+                terminal['status'] = ('PAIR_PENDING_BROWSER_ACCEPTANCE' if terminal['html_generated']
+                                      else 'PAIR_INCOMPLETE')
+                return terminal
             nodes = output / 'nodes'
             nodes.mkdir()
             final = build_main_ui_graph(nodes).invoke(state)
@@ -205,7 +296,9 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
     finally:
         if runtime is not None:
             terminal['model_calls'] = list(runtime.used)
-        terminal['request_records'] = [str(path.relative_to(output)) for path in sorted((output / 'requests').glob('*_terminal.json'))]
+        request_records = (output.glob('*/requests/*_terminal.json') if source_binding_pair
+                           else (output / 'requests').glob('*_terminal.json'))
+        terminal['request_records'] = [str(path.relative_to(output)) for path in sorted(request_records)]
         for key, value in before.items():
             if value is None: os.environ.pop(key, None)
             else: os.environ[key] = value
