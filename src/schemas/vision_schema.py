@@ -1,4 +1,4 @@
-from typing import Literal, List, Optional
+from typing import Any, Literal, List, Optional
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 
@@ -51,6 +51,8 @@ class UIElement(BaseModel):
     confidence: float = Field(0.5, ge=0.0, le=1.0)
     visible: bool = True
     source: Literal['vision', 'inferred'] = 'vision'
+    items: Optional[List[dict[str, Any]]] = None
+    items_source: Optional[dict[str, Any]] = None
 
 
 class VisionValidation(BaseModel):

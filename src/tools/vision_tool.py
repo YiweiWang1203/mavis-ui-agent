@@ -3,6 +3,7 @@ import io
 import json
 import time
 import base64
+from copy import deepcopy
 from typing import Tuple, Optional, List, Dict, Any
 from PIL import Image, ImageFilter
 from pydantic import ValidationError
@@ -118,6 +119,18 @@ def _normalize_element(raw: dict, canvas_w: int, canvas_h: int, idx: int) -> Tup
     el['parent_id'] = raw.get('parent_id')
     el['children_ids'] = list(dict.fromkeys(raw.get('children_ids') or []))
     el['source'] = raw.get('source', 'vision') if raw.get('source') in ('vision', 'inferred') else 'vision'
+    # Nested observations retain their original identities and geometry.
+    # They are evidence, not additional normalized top-level objects.
+    if 'items' in raw:
+        if not isinstance(raw['items'], list) or not all(isinstance(item, dict) for item in raw['items']):
+            return None, 'invalid_nested_items'
+        el['items'] = deepcopy(raw['items'])
+        el['items_source'] = {
+            'source': 'vision_response',
+            'parent_id': eid,
+            'coordinate_space': 'original_vision_response',
+            'canvas': {'width': canvas_w, 'height': canvas_h},
+        }
 
     bbox_candidate = _parse_bbox_candidate(raw)
     if bbox_candidate is None:
