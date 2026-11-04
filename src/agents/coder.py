@@ -111,7 +111,7 @@ def is_complete_html_document(code: str) -> bool:
 
 
 def generate_region_bundle(state, original_request, transcript):
-    from src.renderers.region_bundle import Bundle, CONTENT_TAGS, FIXED_CSS, LEAF_TAGS, render_region_bundle
+    from src.renderers.region_bundle import Bundle, CONTENT_TAGS, LEAF_TAGS, layout_style_targets, render_region_bundle
     from src.utils.coder_execution_input import coder_execution_state
     from src.utils.pipeline_trace import trace_event
     from src.service.main_model_runtime import main_client
@@ -127,15 +127,17 @@ def generate_region_bundle(state, original_request, transcript):
     system = (prompt.read_text(encoding="utf-8")
               + "\nAllowed leaf root tags: " + ", ".join(sorted(LEAF_TAGS))
               + "\nAllowed fragment tags: " + ", ".join(sorted(CONTENT_TAGS))
-              + "\n" + FIXED_CSS
               + "\nJSON schema: " + json.dumps(Bundle.model_json_schema()))
-    trace_event("coder.execution_input", output=execution, diagnostic_state_preserved=True)
+    style_targets = layout_style_targets(execution["region_tree"])
+    trace_event("coder.execution_input", output=execution, layout_style_targets=style_targets,
+                diagnostic_state_preserved=True)
     response = client.chat.completions.create(
         model=os.getenv("CODER_MODEL", DEFAULT_CODER_MODEL),
         messages=[{"role": "system", "content": system},
                   {"role": "user", "content": json.dumps({
                       "execution": execution, "original_user_request": original_request,
-                      "asr_transcript": transcript}, ensure_ascii=False)}],
+                      "asr_transcript": transcript, "layout_style_targets": style_targets},
+                      ensure_ascii=False)}],
         temperature=0.2, response_format={"type": "json_object"})
     # The bounded runtime persists the exact model response before compilation.
     raw = response.choices[0].message.content

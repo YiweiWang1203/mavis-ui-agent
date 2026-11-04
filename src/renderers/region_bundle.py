@@ -22,12 +22,101 @@ NODE_STYLE = ("position:relative", "inset:auto", "order:0", "box-sizing:border-b
 REGION_STYLE = ("display:flex", "align-items:stretch", "direction:ltr", "writing-mode:horizontal-tb")
 PAGE_STYLE = ("width:100%", "min-height:100dvh")
 ALIGNMENTS = {"start": "flex-start", "end": "flex-end", "center": "center", "stretch": "stretch"}
-FIXED_CSS = (
-    "Program-owned CSS properties by scope. All layout nodes: "
-    + ", ".join(rule.split(":")[0] for rule in NODE_STYLE) + ", align-self, flex. Regions: "
-    + ", ".join(rule.split(":")[0] for rule in REGION_STYLE) + ", flex-flow. Page: "
-    + ", ".join(rule.split(":")[0] for rule in PAGE_STYLE) + ". Bottom slots: margin-top."
-)
+REGION_TAG = "div"
+SIMPLE_NAME = r"[A-Za-z_-][A-Za-z0-9_-]*"
+
+
+def layout_declarations(node):
+    style = [*NODE_STYLE, "align-self:" + ALIGNMENTS.get(node.get("cross_align"), "auto")]
+    style.append("flex:1 1 0%" if node.get("grow") else "flex:0 1 auto")
+    if node.get("slot") == "bottom":
+        style.append("margin-top:auto")
+    if node["id"] == "page":
+        style.extend(PAGE_STYLE)
+    if "children" in node:
+        style.extend((*REGION_STYLE, "flex-flow:" + node["axis"] + " nowrap"))
+    return style
+
+
+def layout_attributes(node):
+    key = node["id"]
+    attrs = {"id": key, "data-ui-id": key}
+    if node.get("slot") == "bottom":
+        attrs["data-ui-slot"] = "bottom"
+    if "children" in node:
+        attrs["data-ui-axis"] = node["axis"]
+    return attrs
+
+
+def layout_style_targets(tree):
+    """Publish the same program-owned identities and declarations used by rendering."""
+    targets = {}
+
+    def visit(node):
+        key = node["id"]
+        escaped = "".join(f"\\{ord(char):x} " for char in key)
+        selector = "#" + key if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", key) else f'[data-ui-id="{escaped}"]'
+        is_region = "children" in node
+        targets[key] = {
+            "kind": "region" if is_region else "leaf",
+            "selector": selector,
+            "program_attributes": layout_attributes(node),
+            "fixed_css": dict(rule.split(":", 1) for rule in layout_declarations(node)),
+        }
+        if is_region:
+            targets[key]["tag"] = REGION_TAG
+            for child in node["children"]:
+                visit(child)
+
+    visit(tree)
+    return targets
+
+
+def initial_css_selector_warnings(css, html):
+    """Diagnose only unconditional, single ID/class rules against static markup."""
+    class MarkupNames(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.ids, self.classes = set(), set()
+
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            if values.get("id"):
+                self.ids.add(values["id"])
+            self.classes.update((values.get("class") or "").split())
+
+    names = MarkupNames()
+    names.feed(html)
+    names.close()
+    # Ignore comments, strings and escaped characters when finding rule boundaries.
+    tokens = re.finditer(r"""/\*[\s\S]*?\*/|"(?:(?:\\[\s\S])|[^"\\])*"|'(?:(?:\\[\s\S])|[^'\\])*'|\\[\s\S]|[{}();\[\]]""", css)
+    candidates = set()
+    start = depth = grouping = 0
+    for token in tokens:
+        value = token.group()
+        if value in ("(", "["):
+            grouping += 1
+        elif value in (")", "]"):
+            grouping -= 1
+        elif not grouping:
+            if value == "{":
+                if depth == 0:
+                    header = re.sub(r"/\*[\s\S]*?\*/", " ", css[start:token.start()]).strip()
+                    if re.fullmatch(r"[.#]" + SIMPLE_NAME, header):
+                        candidates.add(header)
+                depth += 1
+            elif value == "}":
+                depth -= 1
+                if depth == 0:
+                    start = token.end()
+            elif value == ";" and depth == 0:
+                start = token.end()
+        if grouping < 0 or depth < 0:
+            return []
+    if grouping or depth:
+        return []
+    return sorted(selector for selector in candidates
+                  if selector[1:] not in (names.ids if selector[0] == "#" else names.classes))
 
 
 class Component(Contract):
@@ -146,20 +235,10 @@ def render_region_bundle(raw, tree):
 
     def build(node):
         key = node["id"]
-        node_id = escape(key, quote=True)
-        attrs = f' id="{node_id}" data-ui-id="{node_id}"'
-        style = [*NODE_STYLE, "align-self:" + ALIGNMENTS.get(node.get("cross_align"), "auto")]
-        style.append("flex:1 1 0%" if node.get("grow") else "flex:0 1 auto")
-        if node.get("slot") == "bottom":
-            attrs += ' data-ui-slot="bottom"'
-            style.append("margin-top:auto")
-        if key == "page":
-            style.extend(PAGE_STYLE)
+        attrs = "".join(f' {name}="{escape(value, quote=True)}"'
+                        for name, value in layout_attributes(node).items())
         if "children" in node:
-            axis = node["axis"]
-            tag = "div"
-            attrs += f' data-ui-axis="{axis}"'
-            style.extend((*REGION_STYLE, "flex-flow:" + axis + " nowrap"))
+            tag = REGION_TAG
             inner = "".join(build(child) for child in node["children"])
         else:
             part = components[key]
@@ -169,7 +248,7 @@ def render_region_bundle(raw, tree):
             validate_attrs(part.attrs.items(), key, ids, root=True)
             check_inner(key, tag, inner)
             attrs += "".join(f' {name}="{escape(value, quote=True)}"' for name, value in part.attrs.items())
-        attrs += ' style="' + ";".join(rule + " !important" for rule in style) + '"'
+        attrs += ' style="' + ";".join(rule + " !important" for rule in layout_declarations(node)) + '"'
         return f"<{tag}{attrs}>" + (f"{inner}</{tag}>" if tag not in VOID_TAGS else "")
 
     body = build(tree)
@@ -184,4 +263,8 @@ def render_region_bundle(raw, tree):
             + bundle.css + '</style></head><body>'
             + body + '<script>\n' + bundle.js + '\n</script></body></html>')
     validation = check_region_markup(code, tree, direct_parent=True)
+    validation["css_selector_diagnostic"] = {
+        "scope": "initial_static_markup_top_level_single_id_or_class",
+        "unmatched_warnings": initial_css_selector_warnings(bundle.css, code),
+    }
     return code, validation

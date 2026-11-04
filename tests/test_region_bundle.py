@@ -1,12 +1,13 @@
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from src.agents.coder import generate_frontend_code
-from src.renderers.region_bundle import RENDERER, render_region_bundle
+from src.renderers.region_bundle import RENDERER, layout_style_targets, render_region_bundle
 from src.service.main_model_runtime import MODEL, MainModelRuntime
 
 
@@ -66,6 +67,37 @@ class RegionBundleTests(unittest.TestCase):
             with self.subTest(parts=len(parts)), self.assertRaisesRegex(ValueError, "LEAF_COVERAGE"):
                 self.render(BUNDLE | {"components": parts})
 
+    def test_catalog_matches_rendered_identity_and_fixed_properties(self):
+        html, _ = self.render(BUNDLE)
+        targets = layout_style_targets(TREE)
+        main = targets["main"]
+        self.assertEqual(main["selector"], "#main")
+        self.assertEqual(main["tag"], "div")
+        self.assertEqual(main["program_attributes"], {"id": "main", "data-ui-id": "main", "data-ui-axis": "column"})
+        self.assertEqual(main["fixed_css"]["flex"], "1 1 0%")
+        self.assertNotIn("width", main["fixed_css"])
+        self.assertEqual(targets["submit"]["fixed_css"]["margin-top"], "auto")
+        self.assertEqual(targets["page"]["fixed_css"]["width"], "100%")
+        for row in targets.values():
+            attrs = " ".join(f'{key}="{value}"' for key, value in row["program_attributes"].items())
+            style = ";".join(f"{prop}:{value} !important" for prop, value in row["fixed_css"].items())
+            self.assertRegex(html, re.escape(attrs) + r'[^>]*' + re.escape(f' style="{style}"'))
+
+    def test_selector_diagnostic_reports_only_simple_initial_markup_misses(self):
+        css = """
+            /* .ghost { color:red } */ .main { padding:8px }
+            #main { overflow:auto } #wrong { margin:0 }
+            #results--row-1 { color:blue } #panel--detail { padding:8px }
+            .later:hover, .combo { color:green }
+            @media(min-width:500px) { .inside { color:blue } }
+            .bad-value { content: "} .not-a-rule { "; }
+            [data-name="{.attribute}"] { color: green }
+        """
+        _, report = self.render(BUNDLE | {"css": css})
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["css_selector_diagnostic"]["unmatched_warnings"],
+                         ["#wrong", ".bad-value", ".main"])
+
     def test_content_cannot_claim_layout_or_duplicate_ids(self):
         for inner in ('<span id="page">bad</span>', '<span data-ui-id="entry">bad</span>',
                       '<span id="submit--one"></span><span id="submit--one"></span>',
@@ -106,5 +138,8 @@ class RegionBundleTests(unittest.TestCase):
                             self.assertFalse((root / "html").exists())
                 request = json.loads((root / "requests/coder_request.json").read_text(encoding="utf-8"))
                 self.assertEqual(request["response_format"], {"type": "json_object"})
+                user = json.loads(request["messages"][1]["content"])
+                self.assertEqual(user["layout_style_targets"], layout_style_targets(TREE))
+                self.assertIn("It has no class", request["messages"][0]["content"])
                 packet = json.loads((root / "requests/coder_response.json").read_text(encoding="utf-8"))
                 self.assertEqual(packet["response"]["choices"][0]["message"]["content"], raw)
