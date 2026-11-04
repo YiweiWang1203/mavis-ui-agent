@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 import json
 import re
 
+from src.renderers.bounded_svg_uri import MAX_SVG_BYTES, MAX_TOTAL_SVG_BYTES, validate_css_svg_urls
 from src.schemas.region_plan import Contract
 from src.utils.region_tree import check_region_markup
 
@@ -31,14 +32,26 @@ MAX_INLINE_SVG_BYTES = 2048
 OPAQUE_ASSET = re.compile(r"(?<![\w-])data:|;base64\s*,|[A-Za-z0-9+/_=-]{1024,}", re.I)
 
 
-def authored_asset_rules():
+def authored_asset_rules(*, bounded_svg_uri=False):
+    policy = "bounded_svg_uri_v2" if bounded_svg_uri else "compact_asset_contract_v1"
+    rule = "Never emit data: URLs, base64 assets, or other large opaque encoded asset payloads."
+    if bounded_svg_uri:
+        rule = (
+            "Never emit base64 assets or other large opaque encoded asset payloads. "
+            "The only permitted data URL is a quoted CSS url() with media type image/svg+xml "
+            "and no parameters except utf8 or charset=utf-8. Use literal or percent-encoded UTF-8 "
+            f"static SVG, at most {MAX_SVG_BYTES} decoded bytes each and {MAX_TOTAL_SVG_BYTES} decoded bytes total. "
+            "Only simple shapes and text are supported, with no scripts, event handlers, entities, external "
+            "references, style or URL attributes. HTML attributes and JS cannot contain data URLs."
+        )
     return (
-        "Asset rules (compact_asset_contract_v1) apply to authored HTML, CSS and JS. "
+        f"Asset rules ({policy}) apply to authored HTML, CSS and JS. "
         "Use only short references supplied by the program for trusted catalog assets. "
         "If none are supplied, use simple CSS shapes or compact inline SVG for avatars and icons. "
-        f"Put SVG markup in component or panel HTML only, at most {MAX_INLINE_SVG_BYTES} UTF-8 bytes "
+        + ("Put inline SVG markup" if bounded_svg_uri else "Put SVG markup")
+        + f" in component or panel HTML only, at most {MAX_INLINE_SVG_BYTES} UTF-8 bytes "
         "per complete <svg> fragment including tags. Use a div or figure with image semantics for an SVG image leaf. "
-        "Never emit data: URLs, base64 assets, or other large opaque encoded asset payloads."
+        + rule
     )
 
 
@@ -285,7 +298,7 @@ class Fragment(HTMLParser):
             raise ValueError(f"REGION_BUNDLE_UNESCAPED_TEXT: {self.owner}")
 
 
-def render_region_bundle(raw, tree):
+def render_region_bundle(raw, tree, *, bounded_svg_uri=False):
     def unique_object(pairs):
         value = dict(pairs)
         if len(value) != len(pairs):
@@ -346,9 +359,12 @@ def render_region_bundle(raw, tree):
     if re.search(r"</?style\b", bundle.css, re.I) or re.search(r"</?script\b|<!--", bundle.js, re.I):
         raise ValueError("REGION_BUNDLE_RAW_TEXT_BOUNDARY")
     for scope, value in (("css", bundle.css), ("js", bundle.js)):
-        check_asset_text(value, scope)
-        if re.search(r"<svg\b", value, re.I):
-            raise ValueError(f"REGION_BUNDLE_SVG_LOCATION: {scope}")
+        if scope == "css" and bounded_svg_uri:
+            validate_css_svg_urls(value, SVG_TAGS, check_asset_text)
+        else:
+            check_asset_text(value, scope)
+            if re.search(r"<svg\b", value, re.I):
+                raise ValueError(f"REGION_BUNDLE_SVG_LOCATION: {scope}")
     code = ('<!doctype html>\n<html><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<style>body{margin:0}[data-ui-id]{min-width:0;min-height:0}\n'

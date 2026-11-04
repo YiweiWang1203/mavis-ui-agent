@@ -118,7 +118,7 @@ def generate_region_bundle(state, original_request, transcript):
     )
     from src.utils.coder_execution_input import coder_execution_state
     from src.utils.pipeline_trace import trace_event
-    from src.service.main_model_runtime import main_client
+    from src.service.main_model_runtime import bounded_svg_uri_enabled, main_client
 
     if (state.get("page_meta", {}).get("contract_version") != 2 or not state.get("region_tree")
             or os.getenv("UI_CODER_CONTRACT_MODE") != "main_system_v1"):
@@ -127,12 +127,13 @@ def generate_region_bundle(state, original_request, transcript):
     if client is None:
         raise RuntimeError("REGION_BUNDLE_REQUIRES_PRODUCTION_RUNTIME")
     execution = coder_execution_state(state)
+    bounded_svg_uri = bounded_svg_uri_enabled()
     prompt = Path(__file__).resolve().parents[1] / "prompts" / "coder_region_bundle.md"
     system = (prompt.read_text(encoding="utf-8")
               + "\nAllowed leaf root tags: " + ", ".join(sorted(LEAF_TAGS))
               + "\nAllowed fragment tags: " + ", ".join(sorted(CONTENT_TAGS))
               + "\n" + authored_attribute_rules()
-              + "\n" + authored_asset_rules()
+              + "\n" + authored_asset_rules(bounded_svg_uri=bounded_svg_uri)
               + "\nJSON schema: " + json.dumps(Bundle.model_json_schema()))
     style_targets = layout_style_targets(execution["region_tree"])
     item_identities = repeated_content_identities(execution.get("elements", []), style_targets)
@@ -149,7 +150,7 @@ def generate_region_bundle(state, original_request, transcript):
         temperature=0.2, response_format={"type": "json_object"})
     # The bounded runtime persists the exact model response before compilation.
     raw = response.choices[0].message.content
-    code, validation = render_region_bundle(raw, state["region_tree"])
+    code, validation = render_region_bundle(raw, state["region_tree"], bounded_svg_uri=bounded_svg_uri)
     trace_event("coder.region_bundle_compiled", output=code, renderer=RENDERER)
     trace_html_contract(code, state, renderer=RENDERER,
                         finish_reason=response.choices[0].finish_reason)
