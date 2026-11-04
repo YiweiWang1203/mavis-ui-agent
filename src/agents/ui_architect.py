@@ -358,6 +358,11 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
         from src.utils.region_tree import compile_region_tree, speech_segments
         system_prompt = (Path(__file__).resolve().parents[1] / 'prompts/ui_architect_region_tree.md').read_text(encoding='utf-8')
         segments = speech_segments(asr_transcript)
+        if os.getenv("UI_REGION_REVIEW_MODE") == "semantic7":
+            from src.schemas.region_plan import RegionPlan
+            system_prompt = (Path(__file__).resolve().parents[1] / 'prompts/ui_architect_region_semantic.md').read_text(encoding='utf-8')
+            system_prompt += "\nShared executable JSON schema:\n" + json.dumps(RegionPlan.model_json_schema())
+            system_prompt += "\nTree cross_align positions a child across its parent axis; start/end/center/stretch. grow=true fills available main-axis space. Preserve repeated content as element items with source identities. Use these fields only when supported by the request or observations."
     elif structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
         from pathlib import Path
         system_prompt = (Path(__file__).resolve().parents[1]/'prompts/ui_architect_hierarchy.md').read_text(encoding='utf-8')
@@ -437,11 +442,21 @@ Return the final fused UI-State JSON.
         )
 
         raw_json_str = response.choices[0].message.content
-        ui_state = json.loads(raw_json_str)
+        try:
+            ui_state = json.loads(raw_json_str)
+        except json.JSONDecodeError:
+            if structure_mode != 'region_tree_v1' or os.getenv("UI_REGION_REVIEW_MODE") != "semantic7":
+                raise
+            ui_state = raw_json_str
         trace_event('architect.model_parsed',output=ui_state)
         if structure_mode == 'region_tree_v1':
             try:
-                compiled = compile_region_tree(ui_state, segments)
+                if os.getenv("UI_REGION_REVIEW_MODE") == "semantic7":
+                    from src.agents.region_review import review_region_plan
+                    compiled = review_region_plan(ui_state, segments, vision_elements, user_intent,
+                                                  planner_model, system_prompt, request_content)
+                else:
+                    compiled = compile_region_tree(ui_state, segments)
             except ValueError as error:
                 trace_event('architect.region_tree_rejected', reason=str(error))
                 raise

@@ -1,7 +1,7 @@
 {
   "version": "main-ui-video-v1",
   "enable_asr": true,
-  "max_physical_requests_per_case": 4,
+  "max_physical_requests_per_case": 7,
   "max_output_tokens": 8192,
   "timeout_seconds": 600,
   "automatic_retries": 0,
@@ -23,6 +23,8 @@
     "UI_RELATION_AGGREGATION_MODE": "off",
     "VISION_MAX_RETRIES": "1",
     "UI_MAIN_LAYOUT_REPORT_ONLY": "1",
-    "LAYOUT_SOLVER_ENABLED": "1"
-  }
+    "LAYOUT_SOLVER_ENABLED": "1",
+    "UI_REGION_REVIEW_MODE": "semantic7"
+  },
+  "runtime_profile": "semantic7"
 }

@@ -106,8 +106,14 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
                    rotate_degrees=180, image_path=None, preferred_locale='auto'):
     config_path = ROOT / 'config/main_ui.json'
     config = json.loads(config_path.read_text(encoding='utf-8'))
+    profile = config.get("runtime_profile", "baseline4")
+    request_limit = {"baseline4": 4, "semantic7": 7}.get(profile)
+    if request_limit is None:
+        raise ValueError("UNKNOWN_RUNTIME_PROFILE")
+    if (profile == "semantic7") != (config['environment'].get('UI_REGION_REVIEW_MODE') == "semantic7"):
+        raise ValueError("REVIEW_RUNTIME_PROFILE_MISMATCH")
     if (config.get('max_physical_requests_per_case'), config.get('max_output_tokens'),
-        config.get('timeout_seconds'), config.get('automatic_retries'), config.get('enable_asr')) != (4, 8192, 600, 0, True):
+        config.get('timeout_seconds'), config.get('automatic_retries'), config.get('enable_asr')) != (request_limit, 8192, 600, 0, True):
         raise ValueError('UNSUPPORTED_MAIN_BUDGET_CONFIG')
     output = Path(output_dir).resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -137,7 +143,7 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
         from src.utils.pipeline_trace import PipelineTrace
         from src.service.input_adapter import prepare_workflow_input
         from langchain_core.messages import HumanMessage
-        with PipelineTrace(output / 'trace', terminal), MainModelRuntime(output / 'requests') as runtime:
+        with PipelineTrace(output / 'trace', terminal), MainModelRuntime(output / 'requests', profile=profile) as runtime:
             prepared = prepare_workflow_input(text=user_prompt, video_path=video_path, image_path=image_path,
                 preprocess_output_dir=str(output / 'preprocess'), rotate_degrees=rotate_degrees,
                 enable_asr=True, vision_image_mode='recognition')

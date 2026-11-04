@@ -17,7 +17,10 @@ def speech_segments(speech):
     return segments
 
 
-def compile_region_tree(plan, segments):
+def compile_region_tree(plan, segments, *, schema_version=1):
+    if schema_version == 2:
+        from src.schemas.region_plan import RegionPlan
+        plan = RegionPlan.model_validate(plan).model_dump(exclude_none=True)
     def require(condition, path):
         if not condition:
             raise ValueError(f"REGION_CONTRACT_INVALID: {path}")
@@ -41,7 +44,7 @@ def compile_region_tree(plan, segments):
         origin = element.get("origin")
         require(origin in ("speech", "vision", "both", "request"), path + ".origin")
         inventory[key] = {field: element[field] for field in (
-            "id", "type", "text", "rpa_action", "origin", "placeholder", "input_type"
+            "id", "type", "text", "rpa_action", "origin", "placeholder", "input_type", "items"
         ) if field in element}
 
     seen = set()
@@ -56,8 +59,13 @@ def compile_region_tree(plan, segments):
         result = {"id": key}
         if slot is not None:
             result["slot"] = slot
+        if schema_version == 2:
+            result["grow"] = node.get("grow", False)
+            if node.get("cross_align") is not None:
+                result["cross_align"] = node["cross_align"]
         if key in inventory:
-            require(set(node) <= {"id", "slot"}, path + ".leaf")
+            allowed = {"id", "slot", "grow", "cross_align"} if schema_version == 2 else {"id", "slot"}
+            require(set(node) <= allowed, path + ".leaf")
             return result
         axis = node.get("axis")
         children = node.get("children")

@@ -1,0 +1,11 @@
+Plan the requested UI from original user intent, numbered ASR segments and visual observations. The executable schema appended below defines the output format. Return only the complete JSON plan.
+
+List actionable spoken requirements with their existing segment IDs, including multiple segments where needed. Bind supported requirements to existing tree IDs. Use page for page-wide requirements. A bound requirement needs at least one target; an unknown requirement has none. Preserve genuine uncertainty. Determine scope and reference objects from the actual meaning; do not invent requirements to populate fields.
+
+Preserve observed identities, supported content and repeated entries, keeping their source IDs in items. Visual observations can contain errors; explicit speech may correct a control type or requested arrangement. Keep spoken-only objects where requested. Do not treat observation coordinates as target boxes. Use the target viewport consistent with the user's request.
+
+The tree is the only layout representation. Every inventory element occurs exactly once as a leaf. Region IDs are globally unique and distinct from element IDs. The root is page. A region holds children; a leaf cannot have children or axis. Compound inputs and buttons share an independent enclosing region. Their local direction and nesting follow the request.
+
+Choose row or column from each region's actual local arrangement. The bottom slot is only permitted on the final child of a column and refers to that local parent. cross_align describes the child's alignment across its parent axis; grow controls filling available space along that axis. Use supported grouping and alignment to preserve local positions without page-global absolute boxes. Region names alone do not establish direction.
+
+Check requirements against the actual tree and content before returning. Preserve independently operable controls, requested repeated content and explicitly requested behaviors. The tree describes the initial view; requested interactive states must remain feasible.

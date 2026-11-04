@@ -25,7 +25,11 @@ def note_vision_repair(feedback):
 
 
 class MainModelRuntime:
-    def __init__(self, output, dispatch=None):
+    def __init__(self, output, dispatch=None, *, profile="baseline4"):
+        if profile not in {"baseline4", "semantic7"}:
+            raise ValueError("UNKNOWN_RUNTIME_PROFILE")
+        self.profile = profile
+        self.limit = 7 if profile == "semantic7" else 4
         self.folder = Path(output)
         self.folder.mkdir(parents=True, exist_ok=False)
         self.dispatch = dispatch or isolated_sdk_call
@@ -51,12 +55,22 @@ class MainModelRuntime:
             slot = 'vision_initial' if not self.used else 'vision_repair'
         else:
             slot = stage
-        if stage not in ('vision', 'architect', 'coder') or slot in self.used or len(self.used) >= 4:
+        if stage not in ('vision', 'architect', 'semantic_audit', 'architect_repair', 'semantic_reaudit', 'coder') or slot in self.used or len(self.used) >= self.limit:
             raise RuntimeError('MAIN_STAGE_ALREADY_CONSUMED_OR_UNAUTHORIZED')
         expected = ('vision' if not self.used else
                     'vision' if self.used == ['vision_initial'] and self.repair_reason is not None else
                     'coder' if self.used[-1] == 'architect' else 'architect')
-        if stage != expected:
+        if self.profile == "semantic7" and self.used:
+            successors = {
+                "architect": {"semantic_audit"},
+                "semantic_audit": {"architect_repair", "coder"},
+                "architect_repair": {"semantic_reaudit"},
+                "semantic_reaudit": {"coder"},
+            }
+            allowed = successors.get(self.used[-1], {expected})
+        else:
+            allowed = {expected}
+        if stage not in allowed:
             raise RuntimeError('MAIN_STAGE_ORDER_VIOLATION')
         if kwargs.get('model') != MODEL:
             raise RuntimeError('MAIN_MODEL_CONFIGURATION_MISMATCH')
