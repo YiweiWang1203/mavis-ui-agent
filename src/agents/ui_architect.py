@@ -348,12 +348,17 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
 
 
 @traced_stage('architect.generate')
-def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None, image_data_url: str | None = None, *, attach_observation_image: bool = False) -> dict:
+def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None, image_data_url: str | None = None, *, attach_observation_image: bool = False, asr_transcript: str = "") -> dict:
     """Fuse user intent and validated vision data into a UI-State JSON contract."""
     structure_mode = os.getenv('UI_STRUCTURE_MODE', 'baseline')
-    if structure_mode not in {'baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
+    if structure_mode not in {'baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1','region_tree_v1'}:
         raise ValueError('Unsupported structure mode')
-    if structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
+    if structure_mode == 'region_tree_v1':
+        from pathlib import Path
+        from src.utils.region_tree import compile_region_tree, speech_segments
+        system_prompt = (Path(__file__).resolve().parents[1] / 'prompts/ui_architect_region_tree.md').read_text(encoding='utf-8')
+        segments = speech_segments(asr_transcript)
+    elif structure_mode in {'hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1'}:
         from pathlib import Path
         system_prompt = (Path(__file__).resolve().parents[1]/'prompts/ui_architect_hierarchy.md').read_text(encoding='utf-8')
         if structure_mode in {'hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1'}:
@@ -405,6 +410,10 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
 Return the final fused UI-State JSON.
 """
 
+    if structure_mode == 'region_tree_v1':
+        numbered = {key: segment['text'] for key, segment in segments.items()}
+        user_content += "\n[Numbered Fresh ASR Segments]\n" + json.dumps(numbered, ensure_ascii=False)
+
     from src.utils.architect_image_context import architect_request_content
     request_content = architect_request_content(user_content, structure_mode, image_data_url,
                                                attach_observation_image=attach_observation_image)
@@ -430,6 +439,14 @@ Return the final fused UI-State JSON.
         raw_json_str = response.choices[0].message.content
         ui_state = json.loads(raw_json_str)
         trace_event('architect.model_parsed',output=ui_state)
+        if structure_mode == 'region_tree_v1':
+            try:
+                compiled = compile_region_tree(ui_state, segments)
+            except ValueError as error:
+                trace_event('architect.region_tree_rejected', reason=str(error))
+                raise
+            trace_event('architect.region_tree_compiled', output=compiled)
+            return compiled
         specialist_mode = os.getenv('UI_RELATION_SPECIALIST_MODE', 'off')
         input_audit_mode = os.getenv('UI_INPUT_SEMANTIC_AUDIT_MODE', 'off')
         if input_audit_mode not in {'off', 'input_audit_v1', 'requirement_slots_v1'}:

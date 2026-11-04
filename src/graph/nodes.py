@@ -516,7 +516,8 @@ def ui_architect_node(state: State) -> Command[Literal["supervisor"]]:
 
     # 正常的数据合成业务逻辑
     combined_intent = original_prompt
-    result_json = generate_ui_state(combined_intent, vision_elements, preferred_locale=state.get("preferred_locale"))
+    result_json = generate_ui_state(combined_intent, vision_elements, preferred_locale=state.get("preferred_locale"),
+                                    asr_transcript=state.get("asr_transcript") or "")
 
     try:
         al = state.get('_audit_logger_instance')

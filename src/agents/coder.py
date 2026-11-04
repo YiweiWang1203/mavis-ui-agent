@@ -135,7 +135,14 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
             logging.getLogger(__name__).info("Deterministic HTML asset saved to: %s", saved_path)
             return {"code": code, "file_path": saved_path, "renderer": "deterministic"}
 
-    system_prompt = read_coder_prompt()
+    region_tree = ui_state_json.get('region_tree') if ui_state_json.get('page_meta', {}).get('structure_mode') == 'region_tree_v1' else None
+    if region_tree:
+        prompt_dir = Path(__file__).resolve().parents[1] / "prompts"
+        system_prompt = (prompt_dir / "coder_region_tree.md").read_text(encoding="utf-8")
+        system_prompt += "\n\n" + (prompt_dir / "coder_native_controls.md").read_text(encoding="utf-8")
+        system_prompt += "\nThe native control rules preserve geometry only as defined by region_tree. Use the tree as the only layout contract. Do not infer or apply legacy bounding boxes."
+    else:
+        system_prompt = read_coder_prompt()
     if (ui_state_json.get('page_meta',{}).get('layout_solver') or {}).get('version') == 'hierarchy-v1':
         system_prompt += "\nHierarchy contract overrides conflicting placement advice: preserve each id once, exact bbox size and page-global position; do not expand or globally repack controls. Render all elements absolutely under one positioned page root, and attach data-parent-id for non-root elements. Parent backgrounds are permitted behind children. Do not render children a second time through children_ids. Use border-box, zero root/body margins. Render visible region boundaries for drawn containers and image placeholders.\n"
     if os.getenv("UI_CODER_CONTRACT_MODE", "baseline") in {"placement_v1", "typed_controls_v1"}:
@@ -172,6 +179,9 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
         code = strip_markdown_code_fence(raw_code)
         if os.getenv("UI_CODER_CONTRACT_MODE") == "main_system_v1" and not is_complete_html_document(code):
             raise ValueError("INCOMPLETE_HTML_DOCUMENT")
+        if region_tree:
+            from src.utils.region_tree import check_region_markup
+            check_region_markup(code, region_tree)
         trace_html_contract(code,ui_state_json,renderer='llm',
                     finish_reason=getattr(response.choices[0],'finish_reason',None))
 
@@ -199,6 +209,8 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
         return {"code": code, "file_path": saved_path}
 
     except Exception as exc:
+        if region_tree:
+            raise
         print(f"Code generation failed: {exc}")
         return ""
 
