@@ -153,6 +153,40 @@ class Bundle(Contract):
     js: str
 
 
+def content_id_prefix(owner):
+    return owner + "--"
+
+
+def repeated_content_identities(elements, layout_ids):
+    """Publish optional DOM IDs without changing source item identities."""
+    reserved = set(layout_ids)
+    identities = {}
+
+    def item_paths(items, parent=()):
+        for index, item in enumerate(items):
+            if isinstance(item, dict):
+                path = (*parent, index)
+                yield path, item.get("id")
+                children = item.get("items")
+                if isinstance(children, list):
+                    yield from item_paths(children, path)
+
+    for element in elements:
+        owner = element["id"]
+        prefix = content_id_prefix(owner)
+        ordinal = 0
+        for path, source_id in item_paths(element.get("items", [])):
+            while True:
+                ordinal += 1
+                dom_id = f"{prefix}item-{ordinal}"
+                if dom_id not in reserved:
+                    break
+            reserved.add(dom_id)
+            identities.setdefault(owner, []).append(
+                {"item_path": list(path), "source_item_id": source_id, "dom_id": dom_id})
+    return identities
+
+
 def validate_attrs(attrs, owner, ids, *, root=False):
     seen = set()
     for name, value in attrs:
@@ -162,7 +196,7 @@ def validate_attrs(attrs, owner, ids, *, root=False):
             raise ValueError(f"REGION_BUNDLE_ATTRIBUTE: {owner}: {name}")
         seen.add(name)
         if name == "id":
-            prefix = owner + "--"
+            prefix = content_id_prefix(owner)
             if (not value or not value.startswith(prefix) or len(value) == len(prefix)
                     or re.search(r"[\s\x00-\x1f\x7f]", value) or value in ids):
                 raise ValueError(f"REGION_BUNDLE_CONTENT_ID: {owner}: {value}")

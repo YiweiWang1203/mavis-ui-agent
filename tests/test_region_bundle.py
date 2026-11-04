@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from src.agents.coder import generate_frontend_code
-from src.renderers.region_bundle import RENDERER, layout_style_targets, render_region_bundle
+from src.renderers.region_bundle import RENDERER, layout_style_targets, render_region_bundle, repeated_content_identities
 from src.service.main_model_runtime import MODEL, MainModelRuntime
 
 
@@ -127,14 +127,39 @@ class RegionBundleTests(unittest.TestCase):
             with self.subTest(scope=scope), self.assertRaisesRegex(ValueError, "REGION_BUNDLE_ATTRIBUTE: .*: onclick"):
                 self.render(bundle)
 
+    def test_repeated_identity_reserves_layout_ids_and_distinguishes_nested_source_items(self):
+        elements = [{"id": "results", "items": [{"id": "source", "items": [{"id": "source"}]}, {}]}]
+        self.assertEqual(repeated_content_identities(elements, {"results", "results--item-1"}), {"results": [
+            {"item_path": [0], "source_item_id": "source", "dom_id": "results--item-2"},
+            {"item_path": [0, 0], "source_item_id": "source", "dom_id": "results--item-3"},
+            {"item_path": [1], "source_item_id": None, "dom_id": "results--item-4"},
+        ]})
+
+    def test_repeated_content_rejects_bare_duplicate_and_cross_owner_ids(self):
+        for label, ids in (("bare", ("results_1", "results--item-2")),
+                           ("duplicate", ("results--item-1", "results--item-1")),
+                           ("cross owner", ("submit--item-1", "results--item-2"))):
+            bundle = deepcopy(BUNDLE)
+            results = next(part for part in bundle["components"] if part["leaf_id"] == "results")
+            results["inner"] = "".join(f'<p id="{key}">Row</p>' for key in ids)
+            with self.subTest(label=label), self.assertRaisesRegex(ValueError, "REGION_BUNDLE_CONTENT_ID: results"):
+                self.render(bundle)
+
     @patch.dict("os.environ", {"UI_RENDERER_MODE": RENDERER, "UI_CODER_CONTRACT_MODE": "main_system_v1",
                               "CODER_MODEL": MODEL})
     def test_production_coder_keeps_response_separate_and_rejects_failed_compile(self):
-        state = {"region_tree": TREE, "page_meta": {"contract_version": 2}}
+        elements = [{"id": "results", "items": [{"id": "results_1"}]}]
+        state = {"region_tree": TREE, "page_meta": {"contract_version": 2}, "elements": elements}
+        valid = deepcopy(BUNDLE)
+        results = next(part for part in valid["components"] if part["leaf_id"] == "results")
+        results["inner"] = ('<label id="results--name" for="results--item-1">First</label>'
+                            '<input id="results--item-1" aria-labelledby="results--name">')
+        valid["css"] += " #results--item-1{color:red}"
+        valid["js"] += 'document.getElementById("results--item-1").addEventListener("change",()=>{});'
         for success in (True, False):
             with self.subTest(success=success), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                raw = json.dumps(BUNDLE if success else BUNDLE | {"components": []})
+                raw = json.dumps(valid if success else BUNDLE | {"components": []})
 
                 def dispatch(request, **kwargs):
                     return {"ok": True, "response": {"choices": [
@@ -147,7 +172,11 @@ class RegionBundleTests(unittest.TestCase):
                         if success:
                             output = generate_frontend_code(state)
                             self.assertEqual(output["renderer"], RENDERER)
-                            self.assertIn("<!doctype html>", Path(output["file_path"]).read_text(encoding="utf-8"))
+                            html = Path(output["file_path"]).read_text(encoding="utf-8")
+                            self.assertIn("<!doctype html>", html)
+                            self.assertIn(results["inner"], html)
+                            self.assertIn(valid["css"], html)
+                            self.assertIn(valid["js"], html)
                         else:
                             with self.assertRaisesRegex(ValueError, "LEAF_COVERAGE"):
                                 generate_frontend_code(state)
@@ -156,11 +185,16 @@ class RegionBundleTests(unittest.TestCase):
                 self.assertEqual(request["response_format"], {"type": "json_object"})
                 user = json.loads(request["messages"][1]["content"])
                 self.assertEqual(user["layout_style_targets"], layout_style_targets(TREE))
+                self.assertEqual(user["execution"]["elements"], elements)
+                self.assertEqual(user["repeated_content_identities"], {"results": [
+                    {"item_path": [0], "source_item_id": "results_1", "dom_id": "results--item-1"},
+                ]})
                 system = request["messages"][0]["content"]
                 self.assertIn("It has no class", system)
                 self.assertIn("leaf roots (attrs), component descendants (inner), "
                               "and panel descendants (panels[].inner): no data-ui-*, on* attributes", system)
                 self.assertIn('id="panel--example--close"', system)
                 self.assertIn('getElementById("panel--example--close").addEventListener("click"', system)
+                self.assertIn("source_item_id identifies the source item and is never an HTML id", system)
                 packet = json.loads((root / "requests/coder_response.json").read_text(encoding="utf-8"))
                 self.assertEqual(packet["response"]["choices"][0]["message"]["content"], raw)

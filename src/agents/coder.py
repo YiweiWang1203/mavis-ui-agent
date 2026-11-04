@@ -113,6 +113,7 @@ def is_complete_html_document(code: str) -> bool:
 def generate_region_bundle(state, original_request, transcript):
     from src.renderers.region_bundle import (
         Bundle, CONTENT_TAGS, LEAF_TAGS, authored_attribute_rules, layout_style_targets, render_region_bundle,
+        repeated_content_identities,
     )
     from src.utils.coder_execution_input import coder_execution_state
     from src.utils.pipeline_trace import trace_event
@@ -129,17 +130,19 @@ def generate_region_bundle(state, original_request, transcript):
     system = (prompt.read_text(encoding="utf-8")
               + "\nAllowed leaf root tags: " + ", ".join(sorted(LEAF_TAGS))
               + "\nAllowed fragment tags: " + ", ".join(sorted(CONTENT_TAGS))
-               + "\n" + authored_attribute_rules()
+              + "\n" + authored_attribute_rules()
               + "\nJSON schema: " + json.dumps(Bundle.model_json_schema()))
     style_targets = layout_style_targets(execution["region_tree"])
+    item_identities = repeated_content_identities(execution.get("elements", []), style_targets)
     trace_event("coder.execution_input", output=execution, layout_style_targets=style_targets,
-                diagnostic_state_preserved=True)
+                repeated_content_identities=item_identities, diagnostic_state_preserved=True)
     response = client.chat.completions.create(
         model=os.getenv("CODER_MODEL", DEFAULT_CODER_MODEL),
         messages=[{"role": "system", "content": system},
                   {"role": "user", "content": json.dumps({
                       "execution": execution, "original_user_request": original_request,
-                      "asr_transcript": transcript, "layout_style_targets": style_targets},
+                      "asr_transcript": transcript, "layout_style_targets": style_targets,
+                      "repeated_content_identities": item_identities},
                       ensure_ascii=False)}],
         temperature=0.2, response_format={"type": "json_object"})
     # The bounded runtime persists the exact model response before compilation.
