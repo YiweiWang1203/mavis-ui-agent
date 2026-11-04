@@ -819,6 +819,8 @@ def code_node(state: State) -> Command[Literal["supervisor"]]:
             "final_code": final_code, # 🌟 把核心资产装入主状态
             "final_code_path": file_path,
             "final_renderer": renderer,
+            "html_validation": result.get("html_validation") if isinstance(result, dict) else None,
+            "raw_candidate_path": result.get("raw_candidate_path") if isinstance(result, dict) else None,
         },
         goto="supervisor",
     )

@@ -126,7 +126,7 @@ def compile_region_tree(plan, segments, *, schema_version=1):
     return result
 
 
-def check_region_markup(code, tree, *, direct_parent=False):
+def check_region_markup(code, tree, *, direct_parent=False, raise_on_failure=True):
     """Check ID, nesting and order markers in the HTML before saving."""
     expected = []
 
@@ -171,5 +171,8 @@ def check_region_markup(code, tree, *, direct_parent=False):
     parser.close()
     matches = parser.nodes == expected
     trace_event("coder.region_markup", matches=matches, expected=expected, actual=parser.nodes)
-    if not matches:
+    report = {"passed": matches, "expected": expected, "actual": parser.nodes,
+              "error": None if matches else "HTML_REGION_TREE_MISMATCH"}
+    if not matches and raise_on_failure:
         raise ValueError("HTML_REGION_TREE_MISMATCH")
+    return report

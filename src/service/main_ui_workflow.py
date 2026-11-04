@@ -88,6 +88,9 @@ def build_main_ui_graph(output):
             'semantic_contract_issues': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_contract_issues'),
             'semantic_contract_passed': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_contract_passed'),
             'html_persisted': persisted,
+            'html_validation': state.get('html_validation'),
+            'html_contract_passed': (state.get('html_validation') or {}).get('passed'),
+            'raw_candidate_path': state.get('raw_candidate_path'),
             'structure': state_summary(state.get('ui_state_json')),
             'browser_behavior': 'NOT_EXECUTED', 'semantic_requirement_coverage': 'UNKNOWN',
             'limitations': 'No semantic pass or browser pass implied. No automatic repair request.'}
@@ -167,8 +170,16 @@ def run_main_video(*, video_path, user_prompt, output_dir, run_id,
             if terminal['html_generated']:
                 path = Path(final['final_code_path']).resolve()
                 terminal.update(status='HTML_GENERATED_PENDING_BROWSER_ACCEPTANCE', html_path=str(path), html_sha256=sha(path))
+                terminal['html_contract_passed'] = final.get('review', {}).get('html_contract_passed')
+                if terminal['html_contract_passed'] is False:
+                    terminal['status'] = 'HTML_CONTRACT_FAILED_PENDING_BROWSER_ACCEPTANCE'
+                raw_path = final.get('raw_candidate_path')
+                if raw_path and Path(raw_path).is_file():
+                    terminal['raw_html_path'] = str(Path(raw_path).resolve())
+                    terminal['raw_html_sha256'] = sha(raw_path)
                 save(path.parent / 'source_manifest.json', {k: terminal[k] for k in (
-                    'run_id', 'commit', 'input_video', 'input_video_sha256', 'config_sha256', 'html_path', 'html_sha256')})
+                    'run_id', 'commit', 'input_video', 'input_video_sha256', 'config_sha256', 'html_path', 'html_sha256',
+                    'html_contract_passed', 'raw_html_path', 'raw_html_sha256') if k in terminal})
             else:
                 terminal.update(status='NO_HTML', failed_node=final.get('failed_node'),
                     node_error_type=final.get('node_error_type'), vision_status=final.get('vision_status'),

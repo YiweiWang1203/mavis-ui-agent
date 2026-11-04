@@ -77,7 +77,7 @@ def strip_markdown_code_fence(code: str) -> str:
     return text[start:end]
 
 
-def save_html_asset(code: str) -> str | None:
+def save_html_asset(code: str, *, raw_candidate: bool = False) -> str | None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_id = os.getenv("MAVIS_MAIN_RUN_ID")
     output_dir = HTML_OUTPUT_DIR
@@ -86,7 +86,8 @@ def save_html_asset(code: str) -> str | None:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", run_id):
             raise ValueError("INVALID_MAIN_RUN_ID")
         output_dir = output_dir / run_id
-    file_path = output_dir / f"html_generated_{timestamp}.html"
+    prefix = "html_raw_candidate" if raw_candidate else "html_generated"
+    file_path = output_dir / f"{prefix}_{timestamp}.html"
     file_path.parent.mkdir(parents=True, exist_ok=True)
     with file_path.open("x", encoding="utf-8") as stream:
         stream.write(code)
@@ -207,10 +208,14 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
         code = strip_markdown_code_fence(raw_code)
         if os.getenv("UI_CODER_CONTRACT_MODE") == "main_system_v1" and not is_complete_html_document(code):
             raise ValueError("INCOMPLETE_HTML_DOCUMENT")
+        raw_candidate_path = save_html_asset(code, raw_candidate=True) if region_tree else None
+        html_validation = None
         if region_tree:
             from src.utils.region_tree import check_region_markup
-            check_region_markup(code, region_tree, direct_parent=ui_state_json.get("page_meta", {}).get("contract_version") == 2)
-            if ui_state_json.get("page_meta", {}).get("contract_version") == 2:
+            html_validation = check_region_markup(
+                code, region_tree, direct_parent=ui_state_json.get("page_meta", {}).get("contract_version") == 2,
+                raise_on_failure=False)
+            if html_validation["passed"] and ui_state_json.get("page_meta", {}).get("contract_version") == 2:
                 from src.utils.region_execution import attach_region_styles
                 from src.utils.pipeline_trace import trace_event
                 original_html = code
@@ -234,14 +239,16 @@ def generate_frontend_code(ui_state_json: dict, audit_logger=None, *, original_u
         except Exception:
             pass
 
-        saved_path = None
+        saved_path = raw_candidate_path
         try:
-            saved_path = save_html_asset(code)
+            if html_validation is None or html_validation["passed"]:
+                saved_path = save_html_asset(code)
             logging.getLogger(__name__).info("HTML asset saved to: %s", saved_path)
         except Exception as exc:
             logging.getLogger(__name__).error("HTML asset save failed: %s", exc)
 
-        return {"code": code, "file_path": saved_path}
+        return {"code": code, "file_path": saved_path, "raw_candidate_path": raw_candidate_path,
+                "html_validation": html_validation}
 
     except Exception as exc:
         if region_tree:

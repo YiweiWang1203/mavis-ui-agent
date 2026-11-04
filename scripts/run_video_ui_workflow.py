@@ -171,7 +171,7 @@ def main() -> int:
             output_dir=output, run_id=run_id, rotate_degrees=args.rotate_degrees,
             image_path=args.image, preferred_locale=args.locale)
         print(json.dumps(terminal, ensure_ascii=False, indent=2))
-        return 0 if terminal.get("html_generated") else 1
+        return 0 if terminal.get("html_generated") and terminal.get("html_contract_passed") is not False else 1
 
     if args.disable_layout_solver:
         os.environ["LAYOUT_SOLVER_ENABLED"] = "0"
