@@ -348,7 +348,9 @@ def repair_ui_state_with_vision(ui_state: dict, vision_elements: dict, preferred
 
 
 @traced_stage('architect.generate')
-def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None, image_data_url: str | None = None, *, attach_observation_image: bool = False, asr_transcript: str = "") -> dict:
+def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale: str | None = None,
+                      image_data_url: str | None = None, *, attach_observation_image: bool = False,
+                      asr_transcript: str = "", source_relation_evidence: dict | None = None) -> dict:
     """Fuse user intent and validated vision data into a UI-State JSON contract."""
     structure_mode = os.getenv('UI_STRUCTURE_MODE', 'baseline')
     if structure_mode not in {'baseline','hierarchy_v1','hierarchy_evidence_v1','hierarchy_partial_evidence_v1','hierarchy_registry_v1','hierarchy_registry_inline_v1','hierarchy_registry_image_v1','hierarchy_node_evidence_v1','region_tree_v1'}:
@@ -420,6 +422,10 @@ Return the final fused UI-State JSON.
     if structure_mode == 'region_tree_v1':
         numbered = {key: segment['text'] for key, segment in segments.items()}
         user_content += "\n[Numbered Fresh ASR Segments]\n" + json.dumps(numbered, ensure_ascii=False)
+        if source_relation_evidence is not None:
+            user_content += "\n\n[Source Relation Evidence]\n" + json.dumps(source_relation_evidence, ensure_ascii=False)
+    elif source_relation_evidence is not None:
+        raise ValueError("SOURCE_RELATION_EVIDENCE_REQUIRES_REGION_TREE")
 
     from src.utils.architect_image_context import architect_request_content
     request_content = architect_request_content(user_content, structure_mode, image_data_url,
@@ -454,9 +460,13 @@ Return the final fused UI-State JSON.
         if structure_mode == 'region_tree_v1':
             try:
                 if os.getenv("UI_REGION_REVIEW_MODE") == "semantic7":
-                    from src.agents.region_review import review_region_plan
-                    compiled = review_region_plan(ui_state, segments, vision_elements, user_intent,
-                                                  planner_model, system_prompt, request_content)
+                    from src.service.main_model_runtime import architect_review_enabled
+                    if architect_review_enabled():
+                        from src.agents.region_review import review_region_plan
+                        compiled = review_region_plan(ui_state, segments, vision_elements, user_intent,
+                                                      planner_model, system_prompt, request_content)
+                    else:
+                        compiled = compile_region_tree(ui_state, segments, schema_version=2)
                 else:
                     compiled = compile_region_tree(ui_state, segments)
             except ValueError as error:

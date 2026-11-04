@@ -15,6 +15,11 @@ def main_client(stage):
     return runtime.client(stage) if runtime else None
 
 
+def architect_review_enabled():
+    runtime = ACTIVE.get()
+    return runtime is None or runtime.profile != "source_relation_arm2"
+
+
 def note_rejected_architect_repair(diagnostic):
     runtime = ACTIVE.get()
     if (runtime is None or runtime.profile != "semantic7" or runtime.failed
@@ -36,7 +41,8 @@ def note_vision_repair(feedback):
 class MainModelRuntime:
     def __init__(self, output, dispatch=None, *, profile="baseline4"):
         limits = {"baseline4": 4, "semantic7": 7, "audit1": 1,
-                  "repair_probe_control1": 1, "repair_probe_feedback2": 2}
+                  "repair_probe_control1": 1, "repair_probe_feedback2": 2,
+                  "source_relation_extract1": 1, "source_relation_arm2": 2}
         if profile not in limits:
             raise ValueError("UNKNOWN_RUNTIME_PROFILE")
         self.profile = profile
@@ -67,7 +73,8 @@ class MainModelRuntime:
             slot = 'vision_initial' if not self.used else 'vision_repair'
         else:
             slot = stage
-        if stage not in ('vision', 'architect', 'semantic_audit', 'architect_repair', 'semantic_reaudit', 'coder') or slot in self.used or len(self.used) >= self.limit:
+        if stage not in ('vision', 'architect', 'semantic_audit', 'architect_repair', 'semantic_reaudit',
+                         'coder', 'source_relation_extract') or slot in self.used or len(self.used) >= self.limit:
             raise RuntimeError('MAIN_STAGE_ALREADY_CONSUMED_OR_UNAUTHORIZED')
         expected = ('vision' if not self.used else
                     'vision' if self.used == ['vision_initial'] and self.repair_reason is not None else
@@ -78,6 +85,10 @@ class MainModelRuntime:
             allowed = {"coder"}
         elif self.profile == "repair_probe_feedback2":
             allowed = {"coder"} if self.used else {"architect_repair"}
+        elif self.profile == "source_relation_extract1":
+            allowed = {"source_relation_extract"}
+        elif self.profile == "source_relation_arm2":
+            allowed = {"coder"} if self.used else {"architect"}
         elif self.profile == "semantic7" and self.used:
             successors = {
                 "architect": {"semantic_audit"},
