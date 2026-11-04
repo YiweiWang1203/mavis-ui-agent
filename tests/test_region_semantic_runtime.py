@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from pathlib import Path
 import tempfile
 import unittest
@@ -72,6 +73,24 @@ class SemanticRuntimeTests(unittest.TestCase):
         self.assertEqual(issue["plan_path"], "/region_tree/children/0")
         self.assertEqual(issue["resolved_actual"]["id"], "item")
         self.assertEqual(slots.count("architect_repair"), 1)
+
+    def test_metadata_defects_still_trigger_repair_and_never_become_pass(self):
+        plan = deepcopy(PLAN)
+        plan["requirements"] = [{
+            "sources": ["missing_source"], "intent": "request", "certainty": "explicit",
+            "status": "bound", "scope": "missing_region", "targets": [],
+            "references": ["nested_item"]}]
+        original = deepcopy(plan)
+        output, slots = self.exercise(plan, [PASS, plan, PASS])
+        self.assertEqual(slots.count("architect_repair"), 1)
+        self.assertFalse(output["page_meta"]["semantic_review_passed"])
+        self.assertFalse(output["page_meta"]["semantic_contract_passed"])
+        self.assertEqual(len(output["page_meta"]["semantic_contract_issues"]), 4)
+        self.assertEqual(output["requirements"][0]["sources"], ["missing_source"])
+        self.assertEqual(output["requirements"][0]["evidence"], [])
+        self.assertEqual(output["requirements"][0]["targets"], [])
+        self.assertEqual(output["requirements"][0]["status"], "bound")
+        self.assertEqual(plan, original)
 
     def test_baseline_rejects_audit(self):
         with tempfile.TemporaryDirectory() as directory:

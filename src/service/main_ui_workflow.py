@@ -85,6 +85,8 @@ def build_main_ui_graph(output):
         state['review'] = {'reviewer': 'local_artifact_and_structure_audit',
             'semantic_model_review': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_review'),
             'semantic_model_passed': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_review_passed'),
+            'semantic_contract_issues': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_contract_issues'),
+            'semantic_contract_passed': (state.get('ui_state_json') or {}).get('page_meta', {}).get('semantic_contract_passed'),
             'html_persisted': persisted,
             'structure': state_summary(state.get('ui_state_json')),
             'browser_behavior': 'NOT_EXECUTED', 'semantic_requirement_coverage': 'UNKNOWN',

@@ -23,8 +23,9 @@ def compile_region_tree(plan, segments, *, schema_version=1):
         from src.schemas.region_plan import RegionPlan
         from src.utils.region_diagnostics import region_diagnostics
         diagnostics = region_diagnostics(plan, segments)
-        if diagnostics:
-            raise ValueError("REGION_CONTRACT_INVALID: " + json.dumps(diagnostics, ensure_ascii=False))
+        execution_errors = [issue for issue in diagnostics if not issue["path"].startswith("/requirements/")]
+        if execution_errors:
+            raise ValueError("REGION_CONTRACT_INVALID: " + json.dumps(execution_errors, ensure_ascii=False))
         plan = RegionPlan.model_validate(plan).model_dump(exclude_none=True)
     def require(condition, path):
         if not condition:
@@ -91,23 +92,24 @@ def compile_region_tree(plan, segments, *, schema_version=1):
         path = f"requirements[{index}]"
         require(isinstance(row, dict), path)
         sources, intent, status, targets = (row.get(key) for key in ("sources", "intent", "status", "targets"))
-        require(isinstance(sources, list) and sources and all(
+        require(schema_version == 2 or isinstance(sources, list) and sources and all(
             isinstance(key, str) and key in segments for key in sources
         ), path + ".sources")
         require(isinstance(intent, str) and intent.strip(), path + ".intent")
         certainty = row.get("certainty")
         require(certainty in ("explicit", "inferred", "conflicting"), path + ".certainty")
         scope = row.get("scope")
-        require(scope is None or isinstance(scope, str) and scope in seen - inventory.keys(), path + ".scope")
+        require(schema_version == 2 or scope is None or isinstance(scope, str) and scope in seen - inventory.keys(), path + ".scope")
         references = row.get("references")
-        require(isinstance(references, list) and all(
+        require(schema_version == 2 or isinstance(references, list) and all(
             isinstance(key, str) and key in seen for key in references
         ), path + ".references")
-        require(isinstance(targets, list) and all(isinstance(key, str) and key in seen for key in targets)
+        require(schema_version == 2 or isinstance(targets, list) and all(isinstance(key, str) and key in seen for key in targets)
                 and ((status == "bound" and targets) or (status == "unknown" and not targets)), path + ".binding")
         compiled.append({"id": f"req{index + 1}", "intent": intent, "status": status,
                          "certainty": certainty, "scope": scope, "references": list(dict.fromkeys(references)),
-                         "evidence": [{"id": key, **segments[key]} for key in dict.fromkeys(sources)],
+                         "sources": list(sources),
+                         "evidence": [{"id": key, **segments[key]} for key in dict.fromkeys(sources) if key in segments],
                          "targets": list(dict.fromkeys(targets))})
     result = {"page_meta": {"viewport": viewport, "structure_mode": "region_tree_v1"},
               "region_tree": tree, "elements": list(inventory.values()), "requirements": compiled}
@@ -118,6 +120,9 @@ def compile_region_tree(plan, segments, *, schema_version=1):
             require(set(action["sources"]) <= segments.keys(), f"actions[{index}].sources")
         result["actions"] = actions
         result["page_meta"]["contract_version"] = 2
+        semantic_issues = [issue for issue in diagnostics if issue["path"].startswith("/requirements/")]
+        result["page_meta"]["semantic_contract_issues"] = semantic_issues
+        result["page_meta"]["semantic_contract_passed"] = not semantic_issues
     return result
 
 

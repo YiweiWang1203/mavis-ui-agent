@@ -135,5 +135,6 @@ def review_region_plan(plan, segments, vision, original_intent, model, planner_p
         final_review = second
     result = compile_region_tree(plan, segments, schema_version=2)
     result["page_meta"]["semantic_review"] = final_review
-    result["page_meta"]["semantic_review_passed"] = final_review["verdict"] == "pass"
+    result["page_meta"]["semantic_review_passed"] = (
+        final_review["verdict"] == "pass" and result["page_meta"]["semantic_contract_passed"])
     return result
