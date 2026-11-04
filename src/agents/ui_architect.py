@@ -379,6 +379,15 @@ def generate_ui_state(user_intent: str, vision_elements: dict, preferred_locale:
     if observation_mode == "relative_v1":
         from src.service.planner_observation import relative_vision_observations
         request_vision = relative_vision_observations(vision_elements)
+        if structure_mode == "baseline" and os.getenv("UI_FUSION_MODE") == "target_layout_v1":
+            system_prompt += (
+                "\nUse supported left_of and above observations to keep independent controls "
+                "separate and in the indicated order, unless explicit user intent requires a "
+                "different layout. Give each independently operable control its own non-overlapping "
+                "target box. A supported parent container can enclose a text editor and its built-in "
+                "buttons. Reserve separate space for the editable area and each button. Check these "
+                "boxes before returning JSON."
+            )
     elif observation_mode == "full_v1":
         request_vision = vision_elements
     else:

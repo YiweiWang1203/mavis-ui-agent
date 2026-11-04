@@ -265,6 +265,28 @@ class TargetGeometryRejected(ValueError):
     """The opt-in target geometry is not eligible for a Coder request."""
 
 
+def _classify_target_intersections(elements, intersections):
+    from src.utils.hierarchy_contract import CONTAINERS
+
+    indexed = {element["id"]: element for element in elements}
+    interactive = INTERACTIVE_TYPES | {"textarea", "checkbox", "radio", "link"}
+    for intersection in intersections:
+        a, b = (indexed[element_id] for element_id in intersection["ids"])
+        kinds = [str(element.get("type") or "").lower() for element in (a, b)]
+        classification = "observed_intersection_relation_unresolved"
+        if all(kind in interactive for kind in kinds):
+            classification = "independent_control_overlap"
+        else:
+            for child, parent in ((a, b), (b, a)):
+                x1, y1, x2, y2 = child["spatial_info"]["bbox"]
+                if (child.get("parent_id") == parent["id"]
+                        and str(parent.get("type") or "").lower() in CONTAINERS
+                        and intersection["area"] == (x2 - x1) * (y2 - y1)):
+                    classification = "declared_container_contains_child"
+                    break
+        yield {**intersection, "types": kinds, "classification": classification}
+
+
 def _preserve_target_layout(ui_state: dict[str, Any], coordinate_space: str | None) -> dict[str, Any]:
     errors = []
     if coordinate_space != "target_px_xyxy":
@@ -339,6 +361,10 @@ def _preserve_target_layout(ui_state: dict[str, Any], coordinate_space: str | No
             if area:
                 intersections.append({"ids": [element["id"], peer["id"]], "area": area,
                                       "classification": "observed_intersection_relation_unresolved"})
+    if os.getenv("UI_PLANNER_OBSERVATION_MODE") == "relative_v1":
+        trace_event("architect.target_control_conflicts",
+                    intersections=list(_classify_target_intersections(result["elements"], intersections)),
+                    geometry_changed=False)
     result["page_meta"]["layout_solver"] = {"version": "preserve-target-v1", "status": "applied",
         "coordinate_space": coordinate_space, "element_count": len(elements)}
     # Geometry observations stay outside the Coder payload. They do not infer

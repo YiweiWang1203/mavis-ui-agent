@@ -31,7 +31,8 @@ def test_actual_planner_requests_separate_source_geometry(monkeypatch):
         assert ui_architect.generate_ui_state(intent, vision) == original
 
     full, relative = requests
-    assert full["messages"][0] == relative["messages"][0]
+    assert relative["messages"][0]["content"].startswith(full["messages"][0]["content"] + "\n")
+    assert "own non-overlapping target box" in relative["messages"][0]["content"]
     assert all(full[k] == relative[k] for k in full if k != "messages")
     content = relative["messages"][1]["content"]
     assert intent in content
@@ -60,3 +61,39 @@ def test_relative_observation_handles_optional_lists_and_rejects_invalid_identit
                             ([{"id": "e1"}, {"id": "e1"}], "Duplicate")]:
         with pytest.raises(ValueError, match=error):
             relative_vision_observations({"elements": elements})
+
+def test_conflict_trace_distinguishes_container_and_independent_controls(monkeypatch):
+    from src.utils import layout_solver
+
+    def element(element_id, kind, bbox, parent_id=None):
+        return {"id": element_id, "type": kind, "parent_id": parent_id,
+                "spatial_info": {"bbox": bbox}}
+
+    state = {"page_meta": {"viewport": {"width": 200, "height": 120}}, "elements": [
+        element("group", "container", [0, 0, 160, 90]),
+        element("editor", "input", [10, 10, 120, 60], "group"),
+        element("first", "button", [90, 40, 110, 55], "group"),
+        element("second", "button", [95, 35, 115, 60], "first"),
+        element("unlinked", "text", [100, 10, 110, 20]),
+        element("touching", "button", [115, 45, 130, 55], "group"),
+    ]}
+    before = copy.deepcopy(state)
+    events = {}
+
+    def record(name, **event):
+        events[name] = event
+
+    monkeypatch.setattr(layout_solver, "trace_event", record)
+    monkeypatch.setenv("UI_PLANNER_OBSERVATION_MODE", "full_v1")
+    baseline = layout_solver.solve_ui_layout(state, "preserve_target", "target_px_xyxy")
+    assert "architect.target_control_conflicts" not in events
+    monkeypatch.setenv("UI_PLANNER_OBSERVATION_MODE", "relative_v1")
+    result = layout_solver.solve_ui_layout(state, "preserve_target", "target_px_xyxy")
+    assert state == before and result == baseline
+    evidence = events["architect.target_control_conflicts"]
+    assert evidence["geometry_changed"] is False
+    kinds = {tuple(row["ids"]): row["classification"] for row in evidence["intersections"]}
+    assert kinds["group", "editor"] == "declared_container_contains_child"
+    assert kinds["editor", "first"] == kinds["first", "second"] == "independent_control_overlap"
+    assert kinds["group", "unlinked"] == "observed_intersection_relation_unresolved"
+    assert ("second", "touching") not in kinds
