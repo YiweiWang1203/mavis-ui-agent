@@ -111,7 +111,9 @@ def is_complete_html_document(code: str) -> bool:
 
 
 def generate_region_bundle(state, original_request, transcript):
-    from src.renderers.region_bundle import Bundle, CONTENT_TAGS, LEAF_TAGS, layout_style_targets, render_region_bundle
+    from src.renderers.region_bundle import (
+        Bundle, CONTENT_TAGS, LEAF_TAGS, authored_attribute_rules, layout_style_targets, render_region_bundle,
+    )
     from src.utils.coder_execution_input import coder_execution_state
     from src.utils.pipeline_trace import trace_event
     from src.service.main_model_runtime import main_client
@@ -127,6 +129,7 @@ def generate_region_bundle(state, original_request, transcript):
     system = (prompt.read_text(encoding="utf-8")
               + "\nAllowed leaf root tags: " + ", ".join(sorted(LEAF_TAGS))
               + "\nAllowed fragment tags: " + ", ".join(sorted(CONTENT_TAGS))
+               + "\n" + authored_attribute_rules()
               + "\nJSON schema: " + json.dumps(Bundle.model_json_schema()))
     style_targets = layout_style_targets(execution["region_tree"])
     trace_event("coder.execution_input", output=execution, layout_style_targets=style_targets,

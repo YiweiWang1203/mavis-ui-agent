@@ -32,9 +32,13 @@ BUNDLE = {
          '<rect width="40" height="20" fill="url(#icon--gradient)"/>'
          '<text x="1" y="14"><tspan>Icon</tspan></text></svg>'},
     ],
-    "panels": [{"id": "panel--detail", "inner": '<dialog id="panel--detail--dialog">Details</dialog>'}],
+    "panels": [{"id": "panel--detail", "inner": '<dialog id="panel--detail--dialog">Details'
+                '<button id="panel--detail--close" type="button">Close</button></dialog>'}],
     "css": "#aside{min-height:100px}",
-    "js": 'document.getElementById("submit").onclick=()=>document.getElementById("panel--detail--dialog").showModal()',
+    "js": 'document.getElementById("submit").addEventListener("click",()=>'
+          'document.getElementById("panel--detail--dialog").showModal());'
+          'document.getElementById("panel--detail--close").addEventListener("click",()=>'
+          'document.getElementById("panel--detail--dialog").close());',
 }
 
 
@@ -111,6 +115,18 @@ class RegionBundleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "RAW_TEXT_BOUNDARY"):
             self.render(BUNDLE | {"js": 'const x = "</script>";'})
 
+    def test_inline_handlers_rejected_across_authored_markup(self):
+        for scope in ("leaf root", "component descendant", "panel descendant"):
+            bundle = deepcopy(BUNDLE)
+            if scope == "leaf root":
+                bundle["components"][0]["attrs"]["onclick"] = "close()"
+            elif scope == "component descendant":
+                bundle["components"][0]["inner"] = '<span OnClick="close()">Close</span>'
+            else:
+                bundle["panels"][0]["inner"] = '<div><button onclick="close()">Close</button></div>'
+            with self.subTest(scope=scope), self.assertRaisesRegex(ValueError, "REGION_BUNDLE_ATTRIBUTE: .*: onclick"):
+                self.render(bundle)
+
     @patch.dict("os.environ", {"UI_RENDERER_MODE": RENDERER, "UI_CODER_CONTRACT_MODE": "main_system_v1",
                               "CODER_MODEL": MODEL})
     def test_production_coder_keeps_response_separate_and_rejects_failed_compile(self):
@@ -140,6 +156,11 @@ class RegionBundleTests(unittest.TestCase):
                 self.assertEqual(request["response_format"], {"type": "json_object"})
                 user = json.loads(request["messages"][1]["content"])
                 self.assertEqual(user["layout_style_targets"], layout_style_targets(TREE))
-                self.assertIn("It has no class", request["messages"][0]["content"])
+                system = request["messages"][0]["content"]
+                self.assertIn("It has no class", system)
+                self.assertIn("leaf roots (attrs), component descendants (inner), "
+                              "and panel descendants (panels[].inner): no data-ui-*, on* attributes", system)
+                self.assertIn('id="panel--example--close"', system)
+                self.assertIn('getElementById("panel--example--close").addEventListener("click"', system)
                 packet = json.loads((root / "requests/coder_response.json").read_text(encoding="utf-8"))
                 self.assertEqual(packet["response"]["choices"][0]["message"]["content"], raw)

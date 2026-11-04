@@ -24,6 +24,21 @@ PAGE_STYLE = ("width:100%", "min-height:100dvh")
 ALIGNMENTS = {"start": "flex-start", "end": "flex-end", "center": "center", "stretch": "stretch"}
 REGION_TAG = "div"
 SIMPLE_NAME = r"[A-Za-z_-][A-Za-z0-9_-]*"
+RESERVED_ATTRIBUTE_PREFIXES = ("data-ui-", "on")
+FORBIDDEN_ATTRIBUTES = ("is", "srcdoc")
+LEAF_ROOT_RESERVED_ATTRIBUTES = ("id", "style")
+
+
+def authored_attribute_rules():
+    prefixes = ", ".join(prefix + "*" for prefix in RESERVED_ATTRIBUTE_PREFIXES)
+    forbidden = ", ".join(FORBIDDEN_ATTRIBUTES)
+    root_reserved = ", ".join(LEAF_ROOT_RESERVED_ATTRIBUTES)
+    return (
+        "Attribute rules apply to leaf roots (attrs), component descendants (inner), "
+        f"and panel descendants (panels[].inner): no {prefixes} attributes, or {forbidden}. "
+        "In particular, onclick and every other inline event attribute are forbidden throughout authored markup. "
+        f"On leaf roots the program also reserves {root_reserved}."
+    )
 
 
 def layout_declarations(node):
@@ -142,8 +157,8 @@ def validate_attrs(attrs, owner, ids, *, root=False):
     seen = set()
     for name, value in attrs:
         if (not re.fullmatch(r"[a-z][a-z0-9_:-]*", name) or name in seen
-                or name.startswith(("data-ui-", "on")) or name in {"is", "srcdoc"}
-                or (root and name in {"id", "style"})):
+                or name.startswith(RESERVED_ATTRIBUTE_PREFIXES) or name in FORBIDDEN_ATTRIBUTES
+                or (root and name in LEAF_ROOT_RESERVED_ATTRIBUTES)):
             raise ValueError(f"REGION_BUNDLE_ATTRIBUTE: {owner}: {name}")
         seen.add(name)
         if name == "id":
