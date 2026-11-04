@@ -19,6 +19,7 @@ SEMANTIC_LAYOUT_ARM_PROFILES = {
 MEMBERSHIP_RECOVERY_CONTROL = "semantic_membership_recovery_control1"
 MEMBERSHIP_RECOVERY_CANDIDATE = "semantic_membership_recovery_candidate2"
 DIRECT_MULTIMODAL_PROFILE = "direct_multimodal_baseline_v1"
+NATIVE_HTML_AUTOREVIEW_PROFILE = "native_html_autoreview_v1"
 
 
 def main_client(stage):
@@ -76,7 +77,7 @@ class MainModelRuntime:
                   SOURCE_BINDING_RECOVERY_PROFILE: 1, SEMANTIC_LAYOUT_UPSTREAM_PROFILE: 2,
                   **dict.fromkeys(SEMANTIC_LAYOUT_ARM_PROFILES.values(), 2),
                   MEMBERSHIP_RECOVERY_CONTROL: 1, MEMBERSHIP_RECOVERY_CANDIDATE: 2,
-                  DIRECT_MULTIMODAL_PROFILE: 1}
+                  DIRECT_MULTIMODAL_PROFILE: 1, NATIVE_HTML_AUTOREVIEW_PROFILE: 1}
         if profile not in limits:
             raise ValueError("UNKNOWN_RUNTIME_PROFILE")
         self.profile = profile
@@ -108,7 +109,7 @@ class MainModelRuntime:
         else:
             slot = stage
         if stage not in ('vision', 'architect', 'semantic_audit', 'architect_repair', 'semantic_reaudit',
-                         'coder', 'source_relation_extract', 'source_relation_bind', 'direct_coder'
+                         'coder', 'source_relation_extract', 'source_relation_bind', 'direct_coder', 'native_html_review'
                          ) or slot in self.used or len(self.used) >= self.limit:
             raise RuntimeError('MAIN_STAGE_ALREADY_CONSUMED_OR_UNAUTHORIZED')
         expected = ('vision' if not self.used else
@@ -116,6 +117,8 @@ class MainModelRuntime:
                     'coder' if self.used[-1] == 'architect' else 'architect')
         if self.profile == DIRECT_MULTIMODAL_PROFILE:
             allowed = {"direct_coder"}
+        elif self.profile == NATIVE_HTML_AUTOREVIEW_PROFILE:
+            allowed = {"native_html_review"}
         elif self.profile == "audit1":
             allowed = {"semantic_audit"}
         elif self.profile in {"repair_probe_control1", MEMBERSHIP_RECOVERY_CONTROL}:
@@ -171,7 +174,7 @@ class MainModelRuntime:
             response = packet['response']
             terminal.update(usage=response.get('usage'), provider_response_id=response.get('id'))
             choices = response.get('choices', [])
-            if stage == "direct_coder":
+            if stage in {"direct_coder", "native_html_review"}:
                 terminal["finish_reason"] = choices[0].get("finish_reason") if len(choices) == 1 else None
             if len(choices) != 1 or choices[0].get('finish_reason') != 'stop':
                 raise RuntimeError('INCOMPLETE_MODEL_RESPONSE')
