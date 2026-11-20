@@ -1,0 +1,285 @@
+From be106b0954bef1e0157e29a8928f31b827e9bbd8 Mon Sep 17 00:00:00 2001
+From: YiweiWang1203 <wangyiwei1203@163.com>
+Date: Fri, 20 Nov 2026 01:31:54 +0000
+Subject: [PATCH] Observe source-defined prototype actions during bounded page
+ repair
+
+---
+ scripts/observe_prototype_actions.cjs | 112 ++++++++++++++++++++++++++
+ src/service/prototype_actions.py      |  58 +++++++++++++
+ src/service/source_contract.py        |  39 +++++++--
+ 3 files changed, 204 insertions(+), 5 deletions(-)
+ create mode 100644 scripts/observe_prototype_actions.cjs
+ create mode 100644 src/service/prototype_actions.py
+
+diff --git a/scripts/observe_prototype_actions.cjs b/scripts/observe_prototype_actions.cjs
+new file mode 100644
+index 0000000..33f2370
+--- /dev/null
++++ b/scripts/observe_prototype_actions.cjs
+@@ -0,0 +1,112 @@
++/* Offline, read-only observation of a compiled, single-document prototype. */
++const fs = require('node:fs');
++const path = require('node:path');
++const crypto = require('node:crypto');
++const {pathToFileURL} = require('node:url');
++const {chromium} = require(process.env.MAVIS_PLAYWRIGHT_MODULE || 'playwright');
++
++const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
++
++function locate(frame, ref) {
++  const key = ref.group ? 'group' : 'region';
++  if (!/^[\w-]{1,100}$/.test(ref[key]) || (ref.group && ref.region)) throw Error('Invalid target');
++  const matches = frame.locator('[data-' + key + '="' + ref[key] + '"]');
++  if (ref.index === undefined) return matches;
++  if (!Number.isInteger(ref.index) || ref.index < 0) throw Error('Invalid instance index');
++  return matches.nth(ref.index);
++}
++
++async function state(frame, check) {
++  if (check.kind === 'feedback') {
++    return frame.locator('[data-feedback-token]:visible').evaluateAll(es =>
++      es.map(e => [e.dataset.feedbackToken, e.innerText]));
++  }
++  const target = locate(frame, check);
++  if (await target.count() !== 1 || !(await target.isVisible())) throw Error('Unresolved observation target');
++  if (check.kind === 'value') return target.inputValue();
++  if (!['contains', 'text_changes'].includes(check.kind)) throw Error('Unsupported assertion');
++  // Read visible business text only. Ignore instrumentation and hidden descendants.
++  return target.evaluate(root => {
++    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
++    const texts = [];
++    while (walker.nextNode()) {
++      const node = walker.currentNode;
++      if (node.parentElement.closest('[data-feedback-token],script,style')) continue;
++      if (getComputedStyle(node.parentElement).visibility !== 'visible') continue;
++      const range = document.createRange();
++      range.selectNodeContents(node);
++      if (range.getBoundingClientRect().width > 0) texts.push(node.textContent.trim());
++    }
++    return texts.filter(Boolean).join(' ');
++  });
++}
++
++async function act(frame, step) {
++  const target = locate(frame, step);
++  if (await target.count() !== 1) throw Error('Missing or ambiguous action target');
++  if (step.op === 'fill') await target.fill(step.value);
++  else if (step.op === 'select') await target.selectOption(step.value);
++  else if (step.op === 'click') await target.click();
++  else throw Error('Unsupported operation');
++}
++
++async function observe(browser, url, plan, item, directory, n) {
++  const ctx = await browser.newContext({viewport:plan.viewport, serviceWorkers:'block'});
++  const result = {id:item.id, status:'not_evaluated'};
++  try {
++    await ctx.route('**/*', route => route.request().url() === url ? route.continue() : route.abort());
++    const page = await ctx.newPage();
++    page.setDefaultTimeout(3000);
++    await page.goto(url);
++    const slot = page.locator('iframe[data-slot-id]');
++    await slot.first().waitFor();
++    if (await slot.count() !== 1) throw Error('Expected one compiled document');
++    const frame = page.frameLocator('iframe[data-slot-id]');
++    await frame.locator('body').waitFor();
++    for (const step of item.setup || []) await act(frame, step);
++    const check = item.expect;
++    result.before = await state(frame, check);
++    const matches = value => {
++      if (check.kind === 'value') return value === check.value;
++      if (check.kind === 'contains') {
++        if (!check.value) throw Error('Empty expected text');
++        return value.includes(check.value);
++      }
++      if (check.kind === 'feedback') return value.length > 0 && JSON.stringify(value) !== JSON.stringify(result.before);
++      return value !== result.before;
++    };
++    if (matches(result.before)) throw Error('Precondition already satisfies assertion');
++    result.beforeImage = n + '-before.png';
++    await page.screenshot({path:path.join(directory,result.beforeImage)});
++    await act(frame, item.action);
++    const end = Date.now() + 1500;
++    do {
++      result.after = await state(frame, check);
++      if (matches(result.after)) break;
++      await page.waitForTimeout(75);
++    } while (Date.now() < end);
++    result.afterImage = n + '-after.png';
++    await page.screenshot({path:path.join(directory,result.afterImage)});
++    result.status = matches(result.after) ? 'passed' : 'failed';
++  } catch (err) { result.reason = String(err); }
++  finally { await ctx.close(); }
++  return result;
++}
++
++async function main() {
++  const [html, protocol, directory] = process.argv.slice(2);
++  const plan = JSON.parse(fs.readFileSync(protocol,'utf8').replace(/^\uFEFF/,''));
++  if (plan.version !== 1 || !Array.isArray(plan.actions) || plan.actions.length > 64) throw Error('Unsupported plan');
++  fs.mkdirSync(directory,{recursive:true});
++  const report = {schema:1, html:digest(fs.readFileSync(html)), protocol:digest(fs.readFileSync(protocol)),
++    observer:digest(fs.readFileSync(__filename)), viewport:plan.viewport, results:[]};
++  const browser = await chromium.launch({headless:true, executablePath:process.env.MAVIS_CHROMIUM_PATH || undefined});
++  try {
++    report.browser = browser.version();
++    for (const [n,item] of plan.actions.entries()) {
++      report.results.push(await observe(browser,pathToFileURL(path.resolve(html)).href,plan,item,directory,n));
++    }
++  } finally { await browser.close(); }
++  fs.writeFileSync(path.join(directory,'report.json'),JSON.stringify(report,null,2));
++}
++main().catch(error => {console.error(error);process.exitCode=1});
+diff --git a/src/service/prototype_actions.py b/src/service/prototype_actions.py
+new file mode 100644
+index 0000000..162db69
+--- /dev/null
++++ b/src/service/prototype_actions.py
+@@ -0,0 +1,58 @@
++"""Browser observation is supplementary to the existing source contract."""
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import playwright
++
++
++def observe(folder, plan, viewport):
++    destination = folder / "action-observation"
++    destination.mkdir(exist_ok=True)
++    items = plan.get("actions", [])
++    report = destination / "report.json"
++    if os.environ.get("MAVIS_ACTION_OBSERVER", "1") == "0":
++        report.write_text(json.dumps({"reason":"disabled","results":[]}))
++        return []
++    reason = "no action definitions"
++    if isinstance(items, list) and items:
++        spec = destination / "plan.json"
++        spec.write_text(json.dumps({"version": 1, "viewport": dict(zip(("width", "height"), viewport)),
++                                   "actions": items}, ensure_ascii=False))
++        driver = Path(playwright.__file__).parent / "driver"
++        script = Path(__file__).resolve().parents[2] / "scripts/observe_prototype_actions.cjs"
++        try:
++            subprocess.run([str(driver / "node"), str(script), str(folder / "final.html"),
++                            str(spec), str(destination)], check=True, capture_output=True,
++                           timeout=150, env={**os.environ, "MAVIS_PLAYWRIGHT_MODULE": str(driver / "package")})
++            return json.loads(report.read_text())["results"]
++        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
++            reason = type(error).__name__
++    results = [{"id": item.get("id"), "status": "not_evaluated", "reason": reason}
++               for item in items if isinstance(item, dict)] if isinstance(items, list) else []
++    report.write_text(json.dumps({"reason": reason, "results": results}))
++    return results
++
++
++def choose(first, candidate):
++    def successes(entry):
++        checks = {("action", str(row.get("id"))) for row in entry[4] if row["status"] == "passed"}
++        for field, key in (("results", "target"), ("relations", "relation")):
++            for row in entry[5].get(field, []):
++                if row.get("passed"):
++                    checks.add((field, json.dumps(row[key], sort_keys=True)))
++        return checks
++    if first[3] and not candidate[3] or successes(first) - successes(candidate):
++        return first
++    return candidate
++
++
++def publish_first(output, folder, result, selected, passed, actions, detail):
++    for path in folder.iterdir():
++        if path.is_file():
++            shutil.copy2(path, output / path.name)
++    shutil.copytree(folder / "acceptance", output / "acceptance")
++    (output / "action-selection.json").write_text(json.dumps({"selected": selected, "repair_error": detail,
++                                                              "actions": actions}, ensure_ascii=False))
++    return {**result, "html_path": str(output / "final.html"), "page_stage": selected, "source_page_passed": passed}
+diff --git a/src/service/source_contract.py b/src/service/source_contract.py
+index 26e4e64..487dc33 100644
+--- a/src/service/source_contract.py
++++ b/src/service/source_contract.py
+@@ -41,6 +41,16 @@ as {"parent":"rBar","first":"gMain","second":"gSmall","axis":"x","certainty":"co
+ A phone preview inside a canvas sets {"id":"rPhone","parent_region":"rCanvas","description":"phone preview"}.
+ This containment alone needs no relations entry. Never invent a sibling to express containment."""
+ 
++PLAN += """
++Also emit actions: a compact array of confirmed prototype behaviors with unique id and brief source evidence.
++For each item provide optional setup steps, action step, and expect. A step has group, optional zero-based
++index, op (click, fill, select), and value for fill/select. Assertion examples: {"kind":"feedback"} only
++when a visible activation cue suffices; {"kind":"contains","region":"rDetails","value":"specific source text"}
++for newly shown content (observe an existing enclosing region); {"kind":"value","group":"gFilter","value":"default"}
++after selecting a non-default value before reset. text_changes requires a specific business region with
++distinguishable data. Use existing inventory identifiers and confirmed data only; omit speculative tests.
++No arbitrary scripts in assertions. State untestable intended behaviors separately in untested_actions."""
++
+ IMPLEMENT = """# Delivery order
+ Output raw HTML, beginning with doctype, a minimal head (charset and title), and then body immediately.
+ Emit the complete source inventory of regions, controls and labels first. Use concise inline styles for essential
+@@ -52,7 +62,7 @@ Use an empty div with data-ui-image-placeholder for non-icon pictures. Keep ever
+ # Source-to-page contract
+ Render every listed region once with data-region equal to its id. For example, an existing id="rHeader" for region rHeader also needs data-region="rHeader" on that same element. For each confirmed non-static group render exactly
+ count native elements of its kind, with data-group equal to the group id directly on each element in that region.
+-Ordinary actions use named <button type="button">; the runtime supplies their only feedback. Do not create any other
++Ordinary actions use named <button type="button">; the runtime supplies feedback for simple activation only. Implement confirmed content or state changes locally in the document, using the inventory actions and their source evidence. Preserve the native controls. Do not create any other
+ buttons or use clickable divs, alerts or dialogs. Keep uncertain marks static.
+ Tag every static or uncertain group instance with its data-group too, using noninteractive markup.
+ Nest each region or group instance inside its specified parent_region; its nearest enclosing data-region must match.
+@@ -428,6 +438,8 @@ def generate_checked_page(output, request, options):
+     from src.service.direct_multimodal_baseline import submit_direct_html
+     plan = parse_plan((output / "source-plan.txt").read_text())
+     region_ids = [row["id"] for row in plan["regions"]]
++    from src.service.prototype_actions import observe, choose, publish_first
++    first_candidate = None
+     patch_base = None
+     for stage in ("direct_coder", "direct_coder_repair"):
+         folder = output / stage
+@@ -448,17 +460,32 @@ def generate_checked_page(output, request, options):
+             (folder / "model_response.txt").write_text(error.partial)
+             (folder / "interruption.txt").write_text(detail)
+             if stage.endswith("_repair"):
+-                raise PageRejected(detail) from error
++                if first_candidate is None:
++                    raise PageRejected(detail) from error
++                folder, result, selected, passed, actions, findings = first_candidate
++                return publish_first(output, folder, result, selected, passed, actions, detail)
+         except ValueError as error:
+             if not (folder / "document_compilation_error.json").is_file():
+                 raise
+             detail = "\n".join([str(error), *getattr(error, "__notes__", [])])
+             if stage.endswith("_repair"):
+-                raise PageRejected(detail) from error
++                if first_candidate is None:
++                    raise PageRejected(detail) from error
++                folder, result, selected, passed, actions, findings = first_candidate
++                return publish_first(output, folder, result, selected, passed, actions, detail)
+         else:
+             passed = verify_source(folder, plan, options["capture_viewport"] or [1440, 900])
+             report = folder / "acceptance/report.json"
+-            if passed or stage.endswith("_repair"):
++            actions = observe(folder, plan, options["target_viewport"] or [390, 844])
++            failed_actions = [row for row in actions if row["status"] == "failed"]
++            findings = json.loads(report.read_text())
++            candidate = (folder, result, stage, passed, actions, findings)
++            if first_candidate is None:
++                first_candidate = candidate
++            if (passed and not failed_actions) or stage.endswith("_repair"):
++                folder, result, stage, passed, actions, findings = choose(first_candidate, candidate)
++                (output / "action-selection.json").write_text(json.dumps({"selected":stage,
++                    "source_contract_passed":passed,"actions":actions}, ensure_ascii=False))
+                 for path in folder.iterdir():
+                     if path.is_file():
+                         shutil.copy2(path, output / path.name)
+@@ -470,7 +497,9 @@ def generate_checked_page(output, request, options):
+                 "geometry": findings["geometry"],
+                 "failed_relations": [r for r in findings["relations"] if not r["passed"]],
+                 "failed_clicks": [r for r in findings["results"] if not r["passed"]]}, ensure_ascii=False)
+-            if (not findings["issues"] and not findings["dialogs"] and all(r["passed"] for r in findings["results"])
++            if failed_actions:
++                detail += "\nRequired business effects not observed: " + json.dumps(failed_actions, ensure_ascii=False)
++            if (not failed_actions and not findings["issues"] and not findings["dialogs"] and all(r["passed"] for r in findings["results"])
+                     and any(not r["passed"] for r in findings["relations"])):
+                 patch_base = (folder / "model_payload.html").read_text()
+                 system, user = request["messages"]
+-- 
+2.34.1
+
