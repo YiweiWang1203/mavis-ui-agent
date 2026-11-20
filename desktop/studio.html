@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MAVIS · 视频原型工作台</title>
+<style>
+:root {
+  font: 15px "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  color: #20282b;
+  background: #f4f5f7;
+  color-scheme: light;
+  --muted: #667278;
+  --line: #e2e7eb;
+  --accent: #1e292d;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: radial-gradient(ellipse at 90% 0, #ddecf2 0, transparent 60%); min-height: 100vh; }
+button, textarea { font: inherit; }
+button { cursor: pointer; transition: background .18s, box-shadow .18s; }
+button:disabled { opacity: .48; cursor: default; }
+button:focus-visible { outline: 3px solid #4193ac; outline-offset: 4px; }
+header { max-width: 1440px; margin: auto; min-height: 92px; padding: 22px 48px; display: flex; align-items: center; gap: 18px; }
+.logo { display: flex; align-items: center; gap: 12px; font-size: 23px; font-weight: 750; letter-spacing: -1px; }
+.mark { width: 38px; height: 38px; border-radius: 14px; background: #20282b; position: relative; }
+.mark::before, .mark::after { content: ""; position: absolute; width: 6px; height: 18px; top: 10px; left: 11px; background: #d7edf4; transform: skew(-15deg); border-radius: 2px; }
+.mark::after { height: 12px; top: 14px; left: 22px; }
+.product { font-size: 13px; color: var(--muted); }
+.history { margin-left: auto; border: 1px solid #fff; border-radius: 24px; background: #ffffffcf; color: #263237; padding: 11px 17px; display: inline-flex; align-items: center; gap: 9px; font-size: 13px; white-space: nowrap; }
+.history:hover:enabled { background: white; box-shadow: 0 4px 16px #2632370c; }
+.sym { font: 19px "Segoe MDL2 Assets"; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; }
+#language { display: flex; padding: 4px; border-radius: 24px; background: #e7edef; gap: 2px; }
+#language button { border: 0; border-radius: 20px; padding: 8px 12px; background: transparent; color: #5d6a70; font-size: 12px; }
+#language button[aria-pressed=true] { background: white; color: #20282b; box-shadow: 0 2px 5px #26323709; }
+main { max-width: 1440px; margin: auto; padding: 12px 48px 36px; display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start; }
+.hero { grid-column: 1 / -1; padding: 15px 0 10px; }
+h1 { font-size: clamp(32px, 3.6vw, 46px); font-weight: 650; letter-spacing: -.045em; margin: 0 0 12px; line-height: 1.22; }
+.intro p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.8; }
+.composer { background: #ffffffed; border: 1px solid white; border-radius: 30px; padding: 28px; box-shadow: 0 12px 40px #2a414805; }
+.sectionHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
+h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.025em; }
+.countside { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.counter { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.link { border: 0; background: transparent; color: #586a72; font-size: 12px; padding: 6px 4px; }
+.link:hover:enabled { color: #18292f; text-decoration: underline; }
+.entry { display: grid; grid-template-columns: minmax(0, 1fr) 152px; gap: 18px; }
+.editor { min-width: 0; background: #f2f6f8; border: 1px solid #e5ecef; border-radius: 22px; overflow: hidden; }
+.editor:focus-within { outline: 2px solid #86b6c5; outline-offset: 2px; }
+textarea { display: block; width: 100%; min-height: 216px; resize: vertical; padding: 20px; font-size: 15px; line-height: 1.9; color: #303d43; border: 0; background: transparent; outline: none; }
+textarea::placeholder { color: #7b8990; }
+.sources { display: grid; grid-template-rows: repeat(3, minmax(58px, 1fr)); gap: 12px; }
+.source { border: 1px solid #e3e9ec; border-radius: 20px; background: white; display: flex; align-items: center; justify-content: flex-start; padding: 12px 16px; gap: 12px; font-size: 13px; color: #27383f; font-weight: 600; }
+.source .sym { background: #eef4f6; width: 34px; height: 34px; border-radius: 12px; font-size: 17px; }
+.source:hover:enabled { background: #f1f8fa; border-color: #9fc6d2; }
+#camera { background: #deeff5; border-color: #deeff5; }
+#camera .sym { background: #ffffffb0; }
+.media { padding: 0 16px 16px; }
+.media:empty { display: none; }
+.media img, .media video { display: block; max-width: 100%; max-height: 200px; border-radius: 14px; background: #263237; }
+.actions { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 26px; }
+.file { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--muted); font-size: 12px; }
+#filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.primary { flex: none; border: 0; border-radius: 24px; background: #20282b; color: white; padding: 14px 22px; display: flex; align-items: center; gap: 22px; font-size: 14px; font-weight: 600; }
+.primary:hover:enabled { background: #384d57; }
+.primary:disabled { opacity: 1; background: #e7ecef; color: #89959b; }
+.progress { border: 1px solid #fff; border-radius: 30px; background: #e3edf2; padding: 26px; display: flex; flex-direction: column; align-items: flex-start; gap: 18px; min-width: 0; }
+.light { width: 48px; height: 48px; border-radius: 18px; background: #ffffffc9; color: #355a68; font-size: 23px; }
+.progress article { width: 100%; min-width: 0; }
+.progress h2 { font-size: 19px; line-height: 1.45; margin-bottom: 8px; }
+.detail { font-size: 12px; line-height: 1.8; color: #526872; overflow-wrap: anywhere; }
+.meter { height: 5px; border-radius: 6px; background: #ccdce3; margin: 20px 0; overflow: hidden; }
+.meter i { display: block; height: 100%; background: #3f7d92; transition: width .3s; }
+.steps { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 10px; font-size: 12px; color: #657b85; }
+.steps > span { display: flex; align-items: center; gap: 8px; }
+.steps > span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #b9ccd4; flex: none; }
+.steps .active { color: #183d4c; font-weight: 700; }
+.steps .active::before { background: #276b83; box-shadow: 0 0 0 4px #ffffff88; }
+.progress[data-mode=error] { background: #f6e9e8; }
+.progress[data-mode=error] .light { color: #9c4540; }
+.progress[data-mode=error] .meter i { background: #ad5c55; }
+.progress[data-mode=ready] .light { color: #356b5e; }
+.progress[data-mode=working] .light { animation: pulse 2s infinite; }
+#view { margin: 0; width: 100%; justify-content: center; }
+[hidden], #view[hidden] { display: none !important; }
+#transfer { margin-top: 14px; }
+#transferBar { height: 7px; accent-color: #3f7d92 !important; }
+.folders { grid-column: 1 / -1; display: flex; gap: 24px; padding: 0 8px; }
+.folders button { display: flex; align-items: center; gap: 8px; }
+.folders .sym { font-size: 16px; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px #ffffff50; } }
+@media(prefers-reduced-motion:reduce) { *, *::before { animation: none !important; transition: none !important; } }
+@media(max-width:1050px) { header { padding: 20px 28px; } main { padding: 10px 28px 30px; grid-template-columns: minmax(0,1fr) 240px; gap: 20px; } .composer { padding: 24px; } .entry { grid-template-columns: 1fr; } .sources { grid-template-columns: repeat(3,1fr); grid-template-rows: auto; gap: 8px; } .source { padding: 10px; gap: 7px; justify-content: center; } .source .sym { width: 22px; background: transparent; } textarea { min-height: 160px; } }
+@media(max-width:760px) { header { gap: 10px; } .product { display: none; } main { grid-template-columns: 1fr; } .hero { padding-top: 4px; } .progress { flex-direction: row; flex-wrap: wrap; } .progress article { flex: 1; } .steps { grid-template-columns: repeat(3,1fr); } .history { padding: 9px 12px; } .source { font-size: 12px; } .folders { grid-column: 1; } }
+</style></head><body>
+<header><div class="logo"><span class="mark" aria-hidden="true"></span>MAVIS</div><span class="product"><span data-en="Prototype Studio">视频原型工作台</span></span><button class="history" id="resume" disabled><span class="sym" aria-hidden="true">&#xE81C;</span><span data-en="Last job">查看上次任务</span></button><div id="language" role="group" aria-label="界面语言 / Interface language"><button type="button" lang="zh-CN" data-lang="zh-CN" aria-pressed="true">中文</button><button type="button" lang="en" data-lang="en" aria-pressed="false">English</button></div></header>
+<main><section class="hero"><div class="intro"><h1><span data-en="Sketch to prototype">从草图到原型</span></h1><p><span data-en="Upload a sketch or record yourself drawing to create an interactive page.">上传草图或拍下手绘过程，生成可以点击的交互页面。</span></p></div></section>
+<section class="composer"><div class="sectionHead"><h2><label for="prompt"><span data-en="Design prompt">页面生成提示词</span></label></h2><span class="countside"><button class="link" id="clear"><span data-en="Start from scratch">清空重写</span></button><span class="counter" id="count"></span></span></div>
+<div class="entry"><div class="editor"><textarea id="prompt" maxlength="1200" placeholder="描述希望生成的页面，例如：保留草图里的左右分栏，点选工具时显示提示。">请根据草图生成可以交互的页面，保留区域布局、控件和文字，并结合素材中提供的讲解。</textarea><div class="media" id="media"></div></div><div class="sources"><button class="source" id="upload"><span class="sym" aria-hidden="true">&#xE898;</span><span data-en="Upload video">上传视频</span></button><button class="source" id="image"><span class="sym" aria-hidden="true">&#xEB9F;</span><span data-en="Upload image">上传图片</span></button><button class="source" id="camera"><span class="sym" aria-hidden="true">&#xE714;</span><span data-en="Record sketch">现场录像</span></button></div></div>
+<div class="actions"><span class="file"><span class="sym" aria-hidden="true">&#xE723;</span><span id="filename">待添加素材</span></span><button class="primary" id="generate" disabled><span data-en="Generate page">生成页面</span> <span aria-hidden="true">→</span></button></div></section>
+<section class="progress" id="progress" aria-live="polite"><span class="light sym" aria-hidden="true" id="indicator">&#xE823;</span><article><h2 id="stage">生成进度</h2><div class="detail" id="detail">添加草图或视频后，即可开始生成。</div><div id="transfer" hidden><progress id="transferBar" style="width:100%;accent-color:#368369"></progress><div class="detail" id="transferText"></div></div><div class="meter" role="progressbar" aria-label="生成阶段" aria-valuemin="0" aria-valuemax="6" aria-valuenow="0"><i></i></div><div class="steps"><span><span data-en="Upload">上传</span></span><span><span data-en="Read source">读取素材</span></span><span><span data-en="Identify controls">识别控件</span></span><span><span data-en="Generate page">生成页面</span></span><span><span data-en="Validate">验收</span></span><span><span data-en="Save">保存</span></span></div></article><button class="history" id="view" hidden><span data-en="Open prototype">打开生成页</span></button></section><div class="folders"><button class="link" id="inputs"><span class="sym" aria-hidden="true">&#xE8B7;</span><span data-en="Open inputs">打开输入文件夹</span></button><button class="link" id="outputs"><span class="sym" aria-hidden="true">&#xE8B7;</span><span data-en="Open outputs">打开输出文件夹</span></button></div></main>
+<script>
+const by=id=>document.getElementById(id), field=by('prompt');
+let language='zh-CN',promptEdited=false;
+const defaultPrompt={'zh-CN':field.defaultValue,en:'Create an interactive page from the sketch. Preserve its layout, controls, and text, and use any narration in the source material.'};
+const hints={'zh-CN':field.placeholder,en:'Describe the page you want. For example, keep the two-column layout and show feedback when a tool is selected.'};
+const labels=[...document.querySelectorAll('[data-en]')].map(el=>({el,zh:el.textContent}));
+function count(){by('count').textContent=field.value.length+' / 1200'}
+field.oninput=()=>{promptEdited=true;count()};count();
+function applyLanguage(value){
+ language=value;const english=value==='en';document.documentElement.lang=value;
+ document.title=english?'MAVIS · Prototype Studio':'MAVIS · 视频原型工作台';
+ for(const {el,zh} of labels)el.textContent=english?el.dataset.en:zh;
+ for(const el of document.querySelectorAll('[data-lang]'))el.setAttribute('aria-pressed',String(el.dataset.lang===value));
+ if(!promptEdited && field.value!==defaultPrompt[value]){field.value=defaultPrompt[value];count()}
+ field.placeholder=hints[value];
+ document.querySelector('.meter').setAttribute('aria-label',english?'Generation stage':'生成阶段');
+}
+for(const el of document.querySelectorAll('[data-lang]'))el.onclick=()=>chrome.webview.postMessage(JSON.stringify({action:'language',value:el.dataset.lang}));
+by('clear').onclick=()=>{field.value='';field.oninput();field.focus()};
+for(const action of ['upload','image','camera','generate','resume','view','inputs','outputs']){
+ by(action).onclick=()=>chrome.webview.postMessage(JSON.stringify({action,prompt:field.value}));
+}
+chrome.webview.addEventListener('message',({data:s})=>{
+ if(language!==s.language)applyLanguage(s.language);
+ for(const id of ['upload','image','camera','prompt','clear','inputs','outputs'])by(id).disabled=s.busy;
+ by('generate').disabled=s.busy||!s.file;
+ by('resume').disabled=s.busy||!s.canResume;
+ by('view').hidden=!s.canView;
+ by('filename').textContent=s.file||(language==='en'?'No source selected':'待添加素材');by('filename').title=s.file||'';
+ const media=by('media');
+ if((media.dataset.url||'')!==(s.mediaUrl||'')){
+  media.replaceChildren();media.dataset.url=s.mediaUrl||'';
+  if(s.mediaUrl){const player=document.createElement(s.mediaType==='image'?'img':'video');
+   if(s.mediaType==='image')player.alt='本次草图预览';else{player.controls=true;player.preload='metadata';player.playsInline=true}
+   player.src=s.mediaUrl;media.append(player);}
+ }
+ const image=media.querySelector('img');if(image)image.alt=language==='en'?'Sketch preview':'本次草图预览';
+ const uploading=s.total>0, english=language==='en';
+ by('transfer').hidden=!uploading;
+ if(uploading){
+  const size=n=>n>=1048576?(n/1048576).toFixed(1)+' MiB':(n/1024).toFixed(0)+' KiB';
+  const pct=Math.floor(100*s.sent/s.total);
+  by('transferBar').max=s.total;by('transferBar').value=s.sent;
+  by('transferBar').setAttribute('aria-label',english?'Upload progress':'上传进度');
+  const state=s.sent===s.total?(english?'Awaiting server receipt':'等待服务器签收'):s.quietSeconds>=10?(english?'No transfer for '+s.quietSeconds+' s':'已 '+s.quietSeconds+' 秒无传输'):english?'Sending':'正在发送';
+  by('transferText').textContent=pct+'% · '+size(s.sent)+' / '+size(s.total)+' · '+size(s.speed)+'/s · '+state;
+ }
+ document.querySelector('.meter').hidden=uploading;
+ const meter=document.querySelector('.meter');meter.setAttribute('aria-valuenow',String(s.step));meter.setAttribute('aria-valuetext',s.title);
+ meter.firstElementChild.style.width=(s.step/6*100)+'%';
+ document.querySelectorAll('.steps > span').forEach((el,i)=>el.classList.toggle('active',i+1===s.step));
+ by('stage').textContent=s.title;by('detail').textContent=s.detail;
+ by('progress').dataset.mode=s.mode;by('indicator').textContent=String.fromCodePoint(({working:0xE895,ready:0xE73E,error:0xE783})[s.mode]||0xE823);
+});
+chrome.webview.postMessage(JSON.stringify({action:'ready'}));
+</script></body></html>
